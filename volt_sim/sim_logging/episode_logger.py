@@ -72,7 +72,7 @@ class EpisodeLogger:
             print("Existing log corrupt or incompatible, starting fresh.")
             self.episodes = []
 
-    def log_episode(self, episode_summary: dict, episode_num: int):
+    def log_episode(self, episode_summary: dict, episode_num: int, write: bool = True):
         entry = episode_log_entry(episode_summary, episode_num)
         self.episodes.append(entry)
 
@@ -113,8 +113,9 @@ class EpisodeLogger:
             self.first_perfect = entry
             self._save_notable(episode_summary, episode_num, "first_perfect_day")
 
-        # Write rolling log
-        self._write_log()
+        # Write rolling log (can be deferred for batch writes)
+        if write:
+            self._write_log()
 
     def _save_notable(self, episode_summary: dict, episode_num: int, reason: str):
         entry = notable_episode_entry(episode_summary, episode_num, reason)

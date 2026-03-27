@@ -31,9 +31,28 @@ MORNING_PICK_PER_CART_MIN = 1  # min orders per cart
 MORNING_PICK_PER_CART_MAX = 6  # max orders per cart
 
 # ─── Hustle Mode ─────────────────────────────────────────────────────────────
-# On high-volume days the team knows it's a push day — fewer breaks, more focus.
-# Flat OPH multiplier applied to all workers on high-volume days.
-HUSTLE_MODE_BONUS = 1.12  # +12% OPH across the board
+# Agent-callable per worker. +12% OPH while active.
+# Each worker has a daily cap (hours) and a weekly threshold (2× daily cap).
+# Exceeding the weekly threshold triggers exhaustion for the rest of the week:
+# -15% OPH on top of all other modifiers, hustle blocked until Monday.
+HUSTLE_MODE_BONUS = 1.12           # +12% OPH while hustling
+HUSTLE_EXHAUSTION_MULTIPLIER = 0.85  # -15% OPH when exhausted from overuse
+
+# Per-worker daily hustle caps (hours)
+HUSTLE_DAILY_CAPS = {
+    0: 9.5,  # Marcus — all shift hours
+    1: 7.0,  # Nolan     — all except first hour (easing in)
+    2: 6.0,  # Felix    — moderate endurance
+    3: 8.0,  # Blake   — all shift hours
+    4: 8.0,  # Reid      — all shift hours
+    5: 3.0,  # Trent      — low endurance
+    6: 7.0,  # Omar    — most of shift
+}
+# Weekly threshold = 2× daily cap. Hitting it triggers exhaustion.
+HUSTLE_WEEKLY_THRESHOLDS = {w_id: cap * 2 for w_id, cap in HUSTLE_DAILY_CAPS.items()}
+
+# Tasks that cannot be hustled (hustle implies physical output — not admin or standing still)
+HUSTLE_BLOCKED_TASKS = {"management", "idle"}
 
 # ─── Task OPH Multipliers ────────────────────────────────────────────────────
 # Base OPH represents packing speed. Picking is inherently faster.
@@ -82,6 +101,34 @@ MONTH_TO_SEASON = {
     9: "fall",   10: "fall",  11: "fall",
 }
 
+# ─── Weekly Volume Curve ─────────────────────────────────────────────────────
+# Daily order volume as a percentage band of the seasonal range.
+# Monday is heaviest, Friday can be dead slow.
+# Each day rolls a random value within its band.
+# day_of_week: (low_pct, high_pct) — applied to the seasonal spread above the minimum.
+WEEKLY_VOLUME_CURVE = {
+    0: (0.86, 1.00),  # Monday
+    1: (0.71, 0.85),  # Tuesday
+    2: (0.56, 0.70),  # Wednesday
+    3: (0.41, 0.55),  # Thursday
+    4: (0.00, 0.40),  # Friday — can be dead slow
+}
+
+# ─── Monthly Episode ─────────────────────────────────────────────────────────
+WORK_DAYS_PER_MONTH = 20  # 4 weeks × 5 days
+
+# Management backlog
+MANAGEMENT_MIN_DAILY_HOURS = 1.5       # minimum mgmt hours per day
+MANAGEMENT_BACKLOG_WEEK_THRESHOLD = 10.0  # >10hrs backlog entering new week = penalty
+MANAGEMENT_BACKLOG_WEEKLY_PENALTY = -50.0  # per week over threshold
+
+# Cycle counts
+CYCLE_COUNTS_PER_WEEK = 2        # 2 required per week
+CYCLE_COUNT_HOURS = 1.5          # 1.5 hours each (split between Marcus + Nolan)
+CYCLE_COUNT_SLIP_PENALTY_1 = -30.0    # slipped 1 week
+CYCLE_COUNT_SLIP_PENALTY_2 = -75.0    # slipped 2+ weeks
+CYCLE_COUNT_MONTH_MISS_PENALTY = -200.0  # didn't complete all for the month
+
 SEASONS = ["winter", "spring", "summer", "fall"]
 
 # ─── Order Arrival Curve ────────────────────────────────────────────────────
@@ -101,7 +148,7 @@ LUNCH_HOUR = 13.0             # 1:00 PM
 LUNCH_DURATION = 0.5          # 30 minutes
 EOD_HOUR = 17.5               # 5:30 PM — everyone leaves, including Marcus
 ORDER_CUTOFF_HOUR = 17.0      # 5:00 PM — orders after this don't need completing today
-STEP_DURATION = 0.25          # 15-minute intervals
+STEP_DURATION = 1/6           # 10-minute intervals (0.1667 hours)
 
 # Morning arrival ends, afternoon starts, late surge starts
 MORNING_END_HOUR = 14.0       # 2:00 PM
@@ -119,7 +166,7 @@ RESTOCK_STARTING_LEVEL = 1.0            # 100%
 RESTOCK_DRAIN_PER_ORDER = None          # calculated per-episode: 1.0 / total_orders * drain_factor
 RESTOCK_DRAIN_FACTOR = 2.0              # level drains to 0 after ~50% of orders without restocking
 RESTOCK_PICK_PENALTY_THRESHOLD = 0.2    # below 20%, picking OPH drops
-RESTOCK_PICK_PENALTY_MULTIPLIER = 0.25  # at 0% restock, picking is 25% speed (shelves empty)
+RESTOCK_PICK_PENALTY_MULTIPLIER = 0.05  # at 0% restock, picking is 5% speed (nothing on shelves)
 RESTOCK_REFILL_PER_HOUR = None          # calculated per-episode based on restock_hours
 
 # ─── Side Projects ──────────────────────────────────────────────────────────
@@ -140,6 +187,7 @@ TRENT_SORENESS_OPH_PENALTY = 0.50     # 50% OPH drop
 # ─── Marcus Manager Constraints ───────────────────────────────────────────
 MARCUS_MANAGEMENT_HOURS_REQUIRED = 4.0
 MARCUS_PRE_SIM_MANAGEMENT = 1.25         # 7:45 to 9:00 = management before sim starts
+MANAGEMENT_FALLBACK_WORKER_ID = 2          # Felix steps in when Marcus + Nolan are both absent
 
 # ─── Debuff: Sleep Category ─────────────────────────────────────────────────
 SLEEP_DEBUFFS = [
@@ -171,6 +219,20 @@ BAD_HEADSPACE_EFFECTS = {
     "Trent":      {"pack": 1.10, "default": 0.90},
 }
 
+# ─── Daily Call-Off System ──────────────────────────────────────────────────
+# Any worker can call off on any day. Max 2 per day — 3rd is denied.
+# Rolled at the start of each day before debuffs.
+CALL_OFF_PROBABILITIES = {
+    "Marcus": 0.01,    # 1% — management, very rare
+    "Nolan":     0.02,    # 2% — assistant manager, rare
+    "Felix":    0.035,   # 3.5%
+    "Blake":   0.035,   # 3.5%
+    "Reid":      0.035,   # 3.5%
+    "Trent":      0.035,   # 3.5%
+    "Omar":    0.035,   # 3.5%
+}
+MAX_CALL_OFFS_PER_DAY = 2
+
 # ─── Individual Debuffs ─────────────────────────────────────────────────────
 INDIVIDUAL_DEBUFFS = {
     "Marcus": {
@@ -200,12 +262,7 @@ INDIVIDUAL_DEBUFFS = {
         "cooldown_days": 0,   # no cooldown
         "effect": "pack_only",
     },
-    "Reid": {
-        "name": "no_call_no_show",
-        "probability": 0.025,
-        "cooldown_days": 0,
-        "effect": "absent",
-    },
+    "Reid": None,  # Reid's NCNS replaced by general call-off system
     "Trent": {
         "name": "soreness",
         "probability": 1.0 / 6.0,  # 16.7%
@@ -241,12 +298,14 @@ REWARDS = {
     "marcus_per_order":            -0.3,
     "nolan_per_order":                -0.15,
 
-    # Restock — Marcus/Nolan should be preferred restockers
-    "per_restock_completed":          0.3,
-    "all_restock_bonus":             10.0,
-    "per_restock_bleed":             -0.5,
-    "restock_pick_interruption":     -3.0,
+    # Restock — critical: empty shelves halt picking
+    "per_restock_completed":          1.0,
+    "all_restock_bonus":             25.0,
+    "per_restock_bleed":             -2.0,
+    "restock_pick_interruption":    -10.0,
     "warehouse_worker_restock":      -0.2,  # penalty for using non-manager on restock
+    "restock_level_low":             -2.0,  # per step when restock level below 20%
+    "restock_level_empty":           -5.0,  # per step when restock level at 0%
 
     # Side projects
     "per_filler_unit":                0.1,
@@ -258,11 +317,12 @@ REWARDS = {
     # Worker management — idle penalty must be strong enough to discourage
     # leaving Marcus/Nolan idle after management quota is met
     "per_productive_hour":            0.3,
+    "per_management_hour":            0.5,    # per-step signal so bot sees value in management
     "per_idle_hour":                 -0.5,
     "packers_starved":               -1.0,   # per packer with nothing to pack while queue has orders
     "picked_backlog":                -0.5,   # per 10 orders sitting picked but not packed
-    "management_duty_met":           20.0,
-    "management_duty_missed":       -30.0,
+    "management_duty_met":           30.0,
+    "management_duty_missed":       -50.0,
     "blake_prohibited_task":        -5.0,
 }
 
@@ -274,39 +334,38 @@ REWARDS = {
 
 # ─── PPO Hyperparameters ────────────────────────────────────────────────────
 PPO = {
-    "lr": 3e-4,
+    "lr": 3e-4,              # slightly higher LR works well with LSTM
     "gamma": 0.99,
     "gae_lambda": 0.95,
     "clip_epsilon": 0.2,
-    "entropy_coeff": 0.01,
+    "entropy_coeff": 0.02,
     "value_loss_coeff": 0.5,
     "max_grad_norm": 0.5,
     "epochs_per_update": 4,
-    "batch_size": 64,
-    "episodes_per_update": 3,    # collect 3 episodes (~100 transitions) before PPO update
-    "hidden_size": 128,
-    "num_layers": 2,
+    "hidden_size": 256,      # LSTM hidden state size — larger = better temporal memory
+    "tbptt_chunk_size": 16,  # detach hidden every N steps — must be < day length (~50) to prevent NaN
 }
 
 # ─── Training ───────────────────────────────────────────────────────────────
 TRAINING = {
-    "total_episodes": 100000,
-    "log_interval": 10,
-    "save_interval": 100,
-    "rolling_window": 100,
+    "total_episodes": 1000,      # each episode = 1 full year (~260 days, ~13000 steps at 10min intervals)
+    "log_interval": 1,           # log every year (they're long)
+    "save_interval": 10,         # checkpoint every 10 years
+    "rolling_window": 100,       # rolling window for daily stats
 }
 
 # ─── State Vector Dimensions ────────────────────────────────────────────────
-# Per worker: 6 one-hot task + 10 scalars = 16
+# Per worker: 6 one-hot task + 13 scalars = 19
 # Scalars: oph, hours_worked, hours_remaining, generic_debuff, individual_debuff,
-#          fatigue, is_picker, is_pack_only, soreness_progress, management_hours
-WORKER_STATE_SIZE = NUM_TASKS + 10  # 16
+#          fatigue, is_picker, is_pack_only, soreness_progress, management_hours,
+#          hustle_today_ratio, hustle_weekly_ratio, is_hustle_exhausted
+WORKER_STATE_SIZE = NUM_TASKS + 13  # 19
 ENV_STATE_SIZE = 15     # 1 hour + 1 orders_remaining + 1 orders_completed +
                         # 1 picked_not_audited + 1 restock_remaining +
                         # 1 side_project_progress + 4 season_onehot +
                         # 1 is_high_volume + 1 total_mgmt_hours + 1 picker_needs_replacement +
                         # 1 restock_level
-TOTAL_STATE_SIZE = NUM_WORKERS * WORKER_STATE_SIZE + ENV_STATE_SIZE  # 7*16+15 = 127
+TOTAL_STATE_SIZE = NUM_WORKERS * WORKER_STATE_SIZE + ENV_STATE_SIZE  # 7*19+15 = 148
 
 # ─── OT ─────────────────────────────────────────────────────────────────────
 # Everyone can stay until 6:30 PM (1 hour past 5:30 EOD).

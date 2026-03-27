@@ -97,10 +97,8 @@ def generate_episode(cooldown_tracker: dict = None,
     # Roll debuffs
     workers = roll_debuffs(season, cooldown_tracker)
 
-    # Hustle mode on high-volume days — team pushes harder
-    if high_vol:
-        for w in workers:
-            w.hustle_mode = True
+    # Hustle is now agent-controlled per step — not auto-applied at episode start.
+    # Workers start each day with hustle off; the agent decides when to call it.
 
     # Set picker
     picker_id = PICKER_SCHEDULE.get(day_of_week, 4)  # default Reid

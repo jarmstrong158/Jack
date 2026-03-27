@@ -11,7 +11,9 @@ from volt_sim.config import (
     DAY_START_HOUR, LUNCH_HOUR, LUNCH_DURATION, EOD_HOUR,
     STEP_DURATION, TOTAL_STATE_SIZE,
     WORKER_STATE_SIZE, ENV_STATE_SIZE, SEASONS,
-    MARCUS_MANAGEMENT_HOURS_REQUIRED, REWARDS, OT_WALL_CLOCK_MAX, OT_HARD_STOP,
+    MARCUS_MANAGEMENT_HOURS_REQUIRED, MANAGEMENT_MIN_DAILY_HOURS,
+    MANAGEMENT_FALLBACK_WORKER_ID, MANAGEMENT_BACKLOG_WEEK_THRESHOLD,
+    REWARDS, OT_WALL_CLOCK_MAX, OT_HARD_STOP,
     PACK_FATIGUE_THRESHOLD, PICK_FATIGUE_THRESHOLD,
     TASK_OPH_MULTIPLIER, PICK_MULTIPLIER_MAIN, PICK_MULTIPLIER_SUPPLEMENT,
     MORNING_PICK_CARTS_MIN, MORNING_PICK_CARTS_MAX,
@@ -141,15 +143,15 @@ class WarehouseEnv:
                 self.orders_picked_not_audited += picked
                 w.orders_picked += picked
 
-    def step(self, actions: list[tuple[int, int]]) -> tuple[np.ndarray, float, bool, dict]:
+    def step(self, actions: list[tuple[int, int, bool]]) -> tuple[np.ndarray, float, bool, dict]:
         """
-        actions: list of (worker_id, task_idx) tuples — one per worker.
+        actions: list of (worker_id, task_idx, hustle) tuples — one per worker.
         Every step is a full assignment — agent controls all workers every 15 min.
         Returns: (state, reward, done, info)
         """
         step_reward = 0.0
 
-        for worker_id, task_idx in actions:
+        for worker_id, task_idx, hustle in actions:
             if 0 <= worker_id < NUM_WORKERS and 0 <= task_idx < NUM_TASKS:
                 worker = self.episode.workers[worker_id]
                 new_task = TASKS[task_idx]
@@ -163,6 +165,14 @@ class WarehouseEnv:
                     if worker.current_task != new_task:
                         worker.work_carry = 0.0  # reset carry on task switch
                     worker.current_task = new_task
+
+                    # Apply hustle flag — blocked if exhausted, task ineligible, or daily cap hit
+                    from volt_sim.config import HUSTLE_BLOCKED_TASKS
+                    can_hustle = (hustle and
+                                  not worker.is_hustle_exhausted and
+                                  worker.hustle_hours_today < worker.hustle_daily_cap and
+                                  new_task not in HUSTLE_BLOCKED_TASKS)
+                    worker.hustle_mode = can_hustle
 
         # Check lunch
         is_lunch = (abs(self.current_hour - LUNCH_HOUR) < 0.01)
@@ -201,7 +211,7 @@ class WarehouseEnv:
 
     def _simulate_step(self) -> float:
         reward = 0.0
-        duration = STEP_DURATION  # 0.25 hours (15 min)
+        duration = STEP_DURATION  # 10-minute intervals
 
         # Categorize workers by availability and task
         active_workers = []
@@ -349,17 +359,33 @@ class WarehouseEnv:
                 continue
 
             if task == "management":
-                total_mgmt = sum(mw.management_hours for mw in self.episode.workers
-                                 if mw.worker_id in (0, 1))
-                if total_mgmt < MARCUS_MANAGEMENT_HOURS_REQUIRED:
-                    # Still has management duty to fill
-                    w.management_hours += duration
-                    w.hours_worked += duration
-                    reward += self._add_reward("per_productive_hour", duration)
+                both_primary_absent = all(
+                    mw.is_absent for mw in self.episode.workers if mw.worker_id in (0, 1)
+                )
+                if both_primary_absent and w.worker_id == MANAGEMENT_FALLBACK_WORKER_ID:
+                    # Felix fallback: productive up to 1.5h minimum
+                    fallback_mgmt = self.episode.workers[MANAGEMENT_FALLBACK_WORKER_ID].management_hours
+                    if fallback_mgmt < MANAGEMENT_MIN_DAILY_HOURS:
+                        w.management_hours += duration
+                        w.hours_worked += duration
+                        reward += self._add_reward("per_productive_hour", duration)
+                        reward += self._add_reward("per_management_hour", duration)
+                    else:
+                        reward += self._add_reward("per_idle_hour", duration)
+                        w.hours_worked += duration
                 else:
-                    # Quota already met — this is wasted time, treat as idle
-                    reward += self._add_reward("per_idle_hour", duration)
-                    w.hours_worked += duration
+                    total_mgmt = sum(mw.management_hours for mw in self.episode.workers
+                                     if mw.worker_id in (0, 1))
+                    backlog = getattr(self, '_mgmt_backlog', 0.0)
+                    daily_cap = MARCUS_MANAGEMENT_HOURS_REQUIRED + backlog
+                    if total_mgmt < daily_cap:
+                        w.management_hours += duration
+                        w.hours_worked += duration
+                        reward += self._add_reward("per_productive_hour", duration)
+                        reward += self._add_reward("per_management_hour", duration)
+                    else:
+                        reward += self._add_reward("per_idle_hour", duration)
+                        w.hours_worked += duration
                 continue
 
             # Scale work output by worker effectiveness (debuffs reduce output)
@@ -401,14 +427,34 @@ class WarehouseEnv:
                 w.non_side_project_hours += duration
                 w.check_trent_soreness()
 
+        # Accumulate hustle hours for workers who are actively hustling this step
+        for w in active_workers:
+            if w.hustle_mode:
+                w.hustle_hours_today += duration
+                # Enforce daily cap — turn off hustle if exceeded
+                if w.hustle_hours_today >= w.hustle_daily_cap:
+                    w.hustle_mode = False
+
+        # Restock level penalties — loud signal every step shelves are dangerously low
+        if self.restock_level <= 0.001:
+            reward += self._add_reward("restock_level_empty")
+        elif self.restock_level < RESTOCK_PICK_PENALTY_THRESHOLD:
+            reward += self._add_reward("restock_level_low")
+
         return reward
 
     def _process_arrivals(self):
         if self.episode is None:
             return
-        key = round(self.current_hour, 2)
-        arrivals = self.episode.arrival_schedule.pop(key, 0)  # pop so we don't double-count
-        self.orders_in_queue += arrivals
+        # Process all arrivals up to current time (handles float rounding mismatches)
+        current = round(self.current_hour, 2)
+        to_remove = []
+        for key, count in self.episode.arrival_schedule.items():
+            if key <= current + 0.01:  # small epsilon for float comparison
+                self.orders_in_queue += count
+                to_remove.append(key)
+        for key in to_remove:
+            del self.episode.arrival_schedule[key]
 
     def _check_eod(self) -> float:
         """Returns finalization reward (0.0 if day isn't over yet)."""
@@ -454,8 +500,8 @@ class WarehouseEnv:
             restock_tasks_remaining = max(1, int(self.restock_remaining / STEP_DURATION))
             reward += self._add_reward("per_restock_bleed", restock_tasks_remaining)
 
-        # Management check — shared between Marcus & Nolan, waived on 400+ days
-        total_mgmt = sum(w.management_hours for w in self.episode.workers if w.worker_id in (0, 1))
+        # Management check — Marcus & Nolan primary; Felix fallback if both absent
+        total_mgmt = self._get_effective_management_hours()
         if total_mgmt >= MARCUS_MANAGEMENT_HOURS_REQUIRED:
             reward += self._add_reward("management_duty_met")
         elif self.episode.total_orders >= 400:
@@ -469,6 +515,18 @@ class WarehouseEnv:
             reward += self._add_reward("filler_completion_bonus")
 
         return reward
+
+    def _get_effective_management_hours(self) -> float:
+        """
+        Returns total management hours for today's check.
+        Primary: Marcus + Nolan. If both are absent, Felix's hours count instead.
+        """
+        both_primary_absent = all(
+            w.is_absent for w in self.episode.workers if w.worker_id in (0, 1)
+        )
+        if both_primary_absent:
+            return self.episode.workers[MANAGEMENT_FALLBACK_WORKER_ID].management_hours
+        return sum(w.management_hours for w in self.episode.workers if w.worker_id in (0, 1))
 
     def _add_reward(self, key: str, multiplier: float = 1.0) -> float:
         value = REWARDS[key] * multiplier
@@ -508,6 +566,17 @@ class WarehouseEnv:
             idx += 1
             state[idx] = w.management_hours / max(1.0, MARCUS_MANAGEMENT_HOURS_REQUIRED)
             idx += 1
+            # Hustle capacity: how much daily cap has been used (0=fresh, 1=capped)
+            daily_cap = w.hustle_daily_cap
+            state[idx] = w.hustle_hours_today / max(0.01, daily_cap)
+            idx += 1
+            # Weekly hustle pressure: approaching exhaustion threshold (0=fresh, 1+=exhausted)
+            weekly_threshold = w.hustle_weekly_threshold
+            state[idx] = w.weekly_hustle_hours / max(0.01, weekly_threshold)
+            idx += 1
+            # Exhaustion flag: worker overused hustle this week
+            state[idx] = 1.0 if w.is_hustle_exhausted else 0.0
+            idx += 1
 
         # Environment features
         state[idx] = (self.current_hour - DAY_START_HOUR) / (EOD_HOUR - DAY_START_HOUR)
@@ -536,7 +605,7 @@ class WarehouseEnv:
         state[idx] = 1.0 if self.episode.is_high_volume else 0.0
         idx += 1
 
-        total_mgmt = sum(w.management_hours for w in self.episode.workers if w.worker_id in (0, 1))
+        total_mgmt = self._get_effective_management_hours()
         state[idx] = total_mgmt / MARCUS_MANAGEMENT_HOURS_REQUIRED
         idx += 1
 
@@ -567,7 +636,7 @@ class WarehouseEnv:
         for w in self.episode.workers:
             # Distinguish management from idle in logs
             logged_task = w.current_task
-            total_mgmt = sum(mw.management_hours for mw in self.episode.workers if mw.worker_id in (0, 1))
+            total_mgmt = self._get_effective_management_hours()
             if logged_task == "management" and total_mgmt >= MARCUS_MANAGEMENT_HOURS_REQUIRED:
                 logged_task = "idle"  # quota met, over-management = wasted time
             workers_state.append({
@@ -596,7 +665,7 @@ class WarehouseEnv:
             "restock_level": round(self.restock_level, 3),
         })
 
-    def get_episode_summary(self) -> dict:
+    def get_episode_summary(self, management_backlog: float = 0.0) -> dict:
         ep = self.episode
         total = ep.total_orders
         shipped = self.orders_completed
@@ -610,24 +679,26 @@ class WarehouseEnv:
         restock_pct_raw = 1.0 - (self.restock_remaining / max(0.01, ep.restock_hours))
         all_restock = (restock_pct_raw >= 0.95)
 
-        total_mgmt_grade = sum(w.management_hours for w in ep.workers if w.worker_id in (0, 1))
-        if total >= 400:
-            mgmt_met = True  # waived on heavy days
-        else:
-            mgmt_met = (total_mgmt_grade >= MARCUS_MANAGEMENT_HOURS_REQUIRED)
+        total_mgmt_grade = self._get_effective_management_hours()
+        mgmt_full = (total_mgmt_grade >= MARCUS_MANAGEMENT_HOURS_REQUIRED)  # 4h = A-eligible
+        mgmt_minimum = (total_mgmt_grade >= MANAGEMENT_MIN_DAILY_HOURS)       # 1.5h = operations can continue
 
         no_ot = (self.ot_hours <= 0)
 
-        if not all_orders:
+        if not all_orders or not mgmt_minimum:
+            # Missing orders or sub-1.5h management = always F
             grade = "F"
         else:
             # Start at A, drop one letter per breach
             demerits = 0
             if not all_restock:
                 demerits += 1
-            if not mgmt_met:
-                demerits += 1
+            if not mgmt_full:
+                demerits += 1  # 1.5-4h mgmt = one demerit (B max)
             if not no_ot:
+                demerits += 1
+            # Accumulated backlog over threshold = extra demerit (boss is unhappy)
+            if management_backlog > MANAGEMENT_BACKLOG_WEEK_THRESHOLD:
                 demerits += 1
             grades = ["A", "B", "C", "D", "F"]
             grade = grades[min(demerits, 4)]

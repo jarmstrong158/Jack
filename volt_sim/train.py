@@ -1,5 +1,5 @@
 """
-Training loop for the Volt Warehouse RL simulation.
+Training loop for the Dolly warehouse RL simulation.
 
 Usage:
   python volt_sim/train.py                    # fresh start
@@ -17,30 +17,37 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from volt_sim.config import TRAINING, PPO as PPO_CFG
-from volt_sim.env.warehouse_env import WarehouseEnv
+from volt_sim.env.year_env import YearEnv
 from volt_sim.agent.ppo import PPOAgent
 from volt_sim.agent.actions import decode_actions, get_valid_action_mask, NUM_ACTION_HEADS, ACTION_HEAD_SIZE
-from volt_sim.agent.state import RunningStats, TOTAL_STATE_SIZE
+from volt_sim.agent.state import RunningStats
 from volt_sim.sim_logging.episode_logger import EpisodeLogger
 
 CHECKPOINT_DIR = "volt_sim/data/checkpoints"
 
 
 def find_latest_checkpoint() -> tuple[str, int] | None:
-    """Find the most recent checkpoint and extract its episode number."""
+    """Find the most recently written checkpoint and extract its episode number.
+
+    Sorts by file modification time, not episode number — this correctly handles
+    cases where a fresh training run (ep 10) coexists with stale checkpoints from
+    a previous run (ep 500+) that used a different architecture.
+    """
     pattern = os.path.join(CHECKPOINT_DIR, "ppo_ep*.pt")
     files = glob.glob(pattern)
     if not files:
         return None
-    # Sort by episode number
+
     def ep_num(path):
         name = os.path.basename(path)
         try:
             return int(name.replace("ppo_ep", "").replace(".pt", ""))
         except ValueError:
             return 0
-    files.sort(key=ep_num)
-    latest = files[-1]
+
+    # Sort newest-written first (modification time descending)
+    files.sort(key=os.path.getmtime, reverse=True)
+    latest = files[0]
     return latest, ep_num(latest)
 
 
@@ -50,10 +57,11 @@ def train():
                         help="Resume from checkpoint. 'latest' or a filename like ppo_ep900.pt")
     args = parser.parse_args()
 
-    env = WarehouseEnv()
-    agent = PPOAgent()
+    env = YearEnv()
+    state_size = env.state_size
+    agent = PPOAgent(state_size=state_size)
     logger = EpisodeLogger()
-    state_stats = RunningStats(TOTAL_STATE_SIZE)
+    state_stats = RunningStats(state_size)
 
     total_episodes = TRAINING["total_episodes"]
     log_interval = TRAINING["log_interval"]
@@ -63,20 +71,33 @@ def train():
     # Resume from checkpoint
     if args.resume:
         if args.resume == "latest":
-            result = find_latest_checkpoint()
-            if result:
-                path, ep = result
-                loaded = agent.load(path, state_stats)
-                if loaded:
-                    start_episode = ep + 1
-                    print(f"Resumed from {os.path.basename(path)} (episode {ep})")
-                else:
-                    print("Checkpoint incompatible. Clearing old checkpoints.")
-                    for f in glob.glob(os.path.join(CHECKPOINT_DIR, "ppo_ep*.pt")):
-                        os.remove(f)
-                    start_episode = 1
-            else:
+            # Walk all checkpoints newest-first (by mtime) until one loads cleanly.
+            # Stale/incompatible files are skipped, not deleted — they may belong to
+            # a different run and are harmless once the architecture version tag rejects them.
+            pattern = os.path.join(CHECKPOINT_DIR, "ppo_ep*.pt")
+            candidates = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
+            if not candidates:
                 print("No checkpoints found, starting fresh.")
+            else:
+                loaded_any = False
+                for path in candidates:
+                    def ep_num_from_path(p):
+                        name = os.path.basename(p)
+                        try:
+                            return int(name.replace("ppo_ep", "").replace(".pt", ""))
+                        except ValueError:
+                            return 0
+                    ep = ep_num_from_path(path)
+                    loaded = agent.load(path, state_stats)
+                    if loaded:
+                        start_episode = ep + 1
+                        print(f"Resumed from {os.path.basename(path)} (episode {ep})")
+                        loaded_any = True
+                        break
+                    else:
+                        print(f"Skipping {os.path.basename(path)} (incompatible architecture).")
+                if not loaded_any:
+                    print("No compatible checkpoints found, starting fresh.")
         else:
             path = os.path.join(CHECKPOINT_DIR, args.resume)
             if os.path.exists(path):
@@ -95,29 +116,37 @@ def train():
                 return
 
     print(f"Training episodes {start_episode} to {total_episodes}...")
-    print(f"State size: {TOTAL_STATE_SIZE}")
+    print(f"State size: {state_size} (daily={state_size - YearEnv.YEAR_STATE_SIZE} + year={YearEnv.YEAR_STATE_SIZE})")
     print(f"Action heads: {NUM_ACTION_HEADS} workers × {ACTION_HEAD_SIZE} tasks")
+    print(f"Each episode = 1 full year (~260 work days)")
     print()
 
     start_time = time.time()
+    day_count = 0
 
     for episode_num in range(start_episode, total_episodes + 1):
         state = env.reset()
         state_stats.update(state)
         norm_state = state_stats.normalize(state)
 
+        # Reset LSTM memory — each year is a fresh episode
+        agent.reset_hidden()
+        # Snapshot the entry hidden state before collecting the first day's rollout
+        agent.buffer.set_entry_hidden(agent.hidden)
+
         episode_reward = 0.0
         done = False
         steps = 0
+        ep_day_count = 0
 
         while not done:
-            # Get valid action mask (per-worker)
+            # Get valid action mask
             mask = get_valid_action_mask(env)
 
-            # Select action — one task per worker
+            # Select action — one task per worker (advances LSTM hidden state by 1 step)
             actions, log_prob, value = agent.select_action(norm_state, mask)
 
-            # Decode into (worker_id, task_id) pairs
+            # Decode into (worker_id, task_id, hustle) tuples
             reassignments = decode_actions(actions)
 
             # Step environment
@@ -134,49 +163,72 @@ def train():
             episode_reward += reward
             steps += 1
 
-        # Log episode
-        summary = env.get_episode_summary()
-        logger.log_episode(summary, episode_num)
+            # End of day — learn immediately, don't wait for year-end
+            if info.get("new_day") or done:
+                ep_day_count += 1
+                day_count += 1
 
-        # Update PPO every N episodes (accumulate enough transitions)
-        episodes_per_update = PPO_CFG.get("episodes_per_update", 1)
-        if episode_num % episodes_per_update == 0:
-            metrics = agent.update()
-        else:
-            metrics = {"policy_loss": 0, "value_loss": 0, "entropy": 0}
+                # PPO update — sequential replay preserves LSTM temporal order
+                metrics = agent.update()
 
-        # Print progress
-        if episode_num % log_interval == 0:
-            footer = summary["footer"]
-            header = summary["header"]
-            stats = logger.get_training_stats()
-            elapsed = time.time() - start_time
+                # Snapshot hidden state for the NEXT day's rollout collection.
+                # The hidden state carries across the day boundary — Dolly remembers
+                # what happened earlier this week when making tomorrow's decisions.
+                agent.buffer.set_entry_hidden(agent.hidden)
 
-            print(
-                f"Ep {episode_num:5d} | "
-                f"{header['season']:6s} {header['month']:9s} {header['day_of_week']:9s} | "
-                f"Orders: {footer['orders_shipped']}/{footer['orders_total']} | "
-                f"Grade: {footer['grade']} | "
-                f"Reward: {footer['reward']:8.1f} | "
-                f"OT: {footer['ot_hours']:.1f}h | "
-                f"AvgR100: {stats['avg_reward_last_100']:8.1f} | "
-                f"WinR: {stats['win_rate_last_100']:.1%} | "
-                f"PL: {metrics['policy_loss']:.4f} | "
-                f"VL: {metrics['value_loss']:.4f} | "
-                f"Ent: {metrics['entropy']:.4f} | "
-                f"{elapsed:.0f}s"
-            )
+                # Log daily summary
+                prev_summary = env.daily_summaries[-1] if env.daily_summaries else None
+                if prev_summary:
+                    logger.log_episode(prev_summary, day_count, write=False)
+
+                    if day_count % 10 == 0:
+                        f = prev_summary["footer"]
+                        h = prev_summary["header"]
+                        stats = logger.get_training_stats()
+                        print(
+                            f"  Day {ep_day_count:3d}/{env.total_work_days} | "
+                            f"{h['day_of_week']:3s} {h['month']:9s} | "
+                            f"Orders: {f['orders_shipped']}/{f['orders_total']} | "
+                            f"Grade: {f['grade']} | "
+                            f"Restock: {env.restock_level:.0%} | "
+                            f"Backlog: {env.management_backlog:.1f}h | "
+                            f"WinR: {stats['win_rate_last_100']:.0%}"
+                        )
+
+                # Write log to disk every 50 days
+                if day_count % 50 == 0:
+                    logger._write_log()
+
+        # Year complete — log it
+        year_summary = info.get("year_summary", {})
+        grade_dist = year_summary.get("grade_distribution", {})
+        year_grade = year_summary.get("year_grade", "?")
+
+        elapsed = time.time() - start_time
+        print(
+            f"\nYear {episode_num} complete | "
+            f"Grade: {year_grade} | "
+            f"A:{grade_dist.get('A',0)} B:{grade_dist.get('B',0)} "
+            f"C:{grade_dist.get('C',0)} D:{grade_dist.get('D',0)} F:{grade_dist.get('F',0)} | "
+            f"Days: {ep_day_count} | Steps: {steps} | "
+            f"Reward: {episode_reward:.0f} | "
+            f"Backlog: {env.management_backlog:.1f}h | "
+            f"Overdue CCs: {env.cycle_counts_overdue} | "
+            f"{elapsed:.0f}s\n"
+        )
+
+        # Flush log at year end
+        logger._write_log()
 
         # Save checkpoint
         if episode_num % save_interval == 0:
-            os.makedirs("volt_sim/data/checkpoints", exist_ok=True)
-            agent.save(f"volt_sim/data/checkpoints/ppo_ep{episode_num}.pt", state_stats)
+            os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+            agent.save(f"{CHECKPOINT_DIR}/ppo_ep{episode_num}.pt", state_stats)
 
     # Final save
-    agent.save("volt_sim/data/checkpoints/ppo_final.pt", state_stats)
-    print(f"\nTraining complete. {total_episodes} episodes in {time.time() - start_time:.0f}s")
-    print(f"Logs saved to: volt_sim/data/episode_log.json")
-    print(f"Notable episodes: volt_sim/data/notable_episodes/")
+    os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+    agent.save(f"{CHECKPOINT_DIR}/ppo_final.pt", state_stats)
+    print(f"\nTraining complete. {total_episodes} year-episodes in {time.time() - start_time:.0f}s")
 
 
 if __name__ == "__main__":

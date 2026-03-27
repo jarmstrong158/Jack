@@ -11,7 +11,9 @@ from volt_sim.config import (
     PACK_FATIGUE_THRESHOLD, PICK_FATIGUE_THRESHOLD,
     TRENT_SORENESS_HOUR_THRESHOLD, TRENT_SORENESS_OPH_PENALTY,
     DAY_START_HOUR, TASKS, TASK_TO_IDX,
-    HUSTLE_MODE_BONUS,
+    HUSTLE_MODE_BONUS, HUSTLE_EXHAUSTION_MULTIPLIER,
+    HUSTLE_DAILY_CAPS, HUSTLE_WEEKLY_THRESHOLDS,
+    CALL_OFF_PROBABILITIES, MAX_CALL_OFFS_PER_DAY,
 )
 
 
@@ -59,8 +61,28 @@ class WorkerState:
     # Marcus management
     management_hours: float = 0.0
 
-    # Hustle mode — high-volume day push
+    # Hustle mode — agent-controlled per-step toggle
     hustle_mode: bool = False
+    hustle_hours_today: float = 0.0    # accumulated hustle hours this day
+    weekly_hustle_hours: float = 0.0   # accumulated hustle hours this week (set from YearEnv)
+    is_hustle_exhausted: bool = False  # true if weekly threshold crossed — lasts until Monday
+
+    @property
+    def hustle_daily_cap(self) -> float:
+        return HUSTLE_DAILY_CAPS.get(self.worker_id, 8.0)
+
+    @property
+    def hustle_weekly_threshold(self) -> float:
+        return HUSTLE_WEEKLY_THRESHOLDS.get(self.worker_id, 16.0)
+
+    @property
+    def hustle_daily_remaining(self) -> float:
+        return max(0.0, self.hustle_daily_cap - self.hustle_hours_today)
+
+    @property
+    def can_hustle(self) -> bool:
+        return (not self.is_hustle_exhausted and
+                self.hustle_hours_today < self.hustle_daily_cap)
 
     @property
     def shift_end(self) -> float:
@@ -81,8 +103,9 @@ class WorkerState:
         fatigue_mod = self._fatigue_modifier()
 
         hustle_mod = HUSTLE_MODE_BONUS if self.hustle_mode else 1.0
+        exhaustion_mod = HUSTLE_EXHAUSTION_MULTIPLIER if self.is_hustle_exhausted else 1.0
 
-        return base * sleep_mod * health_mod * individual_mod * fatigue_mod * hustle_mod
+        return base * sleep_mod * health_mod * individual_mod * fatigue_mod * hustle_mod * exhaustion_mod
 
     def _health_modifier_for_task(self, task: str) -> float:
         if self.health_debuff != "bad_headspace":
@@ -167,7 +190,35 @@ def roll_debuffs(season: str, cooldown_tracker: dict) -> list[WorkerState]:
 
         workers.append(w)
 
+    # Roll daily call-offs (max 2 per day)
+    _roll_call_offs(workers)
+
     return workers
+
+
+def _roll_call_offs(workers: list[WorkerState]):
+    """Roll call-offs for each worker. Max MAX_CALL_OFFS_PER_DAY can call off."""
+    call_offs = 0
+    # Shuffle order so it's not biased toward early workers
+    indices = list(range(len(workers)))
+    random.shuffle(indices)
+
+    for i in indices:
+        w = workers[i]
+        if w.is_absent:
+            # Already absent from individual debuff (shouldn't happen now but safety)
+            call_offs += 1
+            continue
+
+        prob = CALL_OFF_PROBABILITIES.get(w.name, 0.0)
+        if prob > 0 and random.random() < prob:
+            if call_offs < MAX_CALL_OFFS_PER_DAY:
+                w.is_absent = True
+                w.individual_debuff = "call_off"
+                w.individual_multiplier = 0.0
+                w.individual_effect = "absent"
+                call_offs += 1
+            # else: denied — tough cookies, we need you today
 
 
 def _roll_individual_debuff(w: WorkerState, cfg: dict, season: str,
