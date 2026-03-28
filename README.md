@@ -20,13 +20,19 @@ Jack learns to optimize across all of it simultaneously — not just routing the
 
 ~2,450 training days (~9.4 simulated years).
 
+**Training history** shows cumulative learning signal and win rate over time — the primary indicator of whether the policy is improving, plateauing, or regressing across episodes.
+
 ![Training Header](docs/screenshots/01_training_header.png)
+
+**Reward and win rate trends** expose how the policy holds up under pressure. A stable upward trend means the agent is generalizing. Dips map directly to seasonal difficulty — useful for identifying where the model needs more reps.
 
 ![Reward and Win Rate Trend](docs/screenshots/02_reward_trend.png)
 
 ---
 
 ## Year Overview
+
+**The year overview** is the top-level accountability view — full order throughput, completion rate, and grade distribution across all 261 work days. It answers whether the agent is running a competent operation across an entire year, not just cherry-picked days.
 
 ![Year Overview](docs/screenshots/03_year_overview.png)
 
@@ -43,6 +49,8 @@ Jack learns to optimize across all of it simultaneously — not just routing the
 
 ## Season Breakdown
 
+**Season performance** isolates where the policy is strong and where it breaks down. Separating by season makes it possible to see whether failures are random or concentrated — and whether the agent is learning to handle the conditions that cause them.
+
 ![Season Performance](docs/screenshots/04_season_performance.png)
 
 | Season | Win Rate |
@@ -52,26 +60,31 @@ Jack learns to optimize across all of it simultaneously — not just routing the
 | Summer | 69% |
 | Fall | 95% |
 
-Primary F-grade driver: bad sleep stacking with call-offs on peak-volume days.
+The debuff impact chart on the right identifies which real-world workforce conditions are most correlated with failure days — giving a direct line of sight into what the agent still needs to solve.
 
 ---
 
 ## Episode Detail
 
+**Per-episode breakdown** surfaces every factor that influenced a given day: debuffs active, tasks assigned, reward components earned or lost. This is where you trace why a day went well or went sideways.
+
 ![Episode Detail](docs/screenshots/05_episode_detail.png)
 
-Blake called off. 86/86 orders. 100% restock. No OT.
+The worker timeline underneath shows the full task sequence for every worker across the shift — the actual decisions the agent made, visible at 15-minute resolution.
 
 ---
 
 ## Order Flow
 
-![Order Flow](docs/screenshots/06_order_flow.png)
+**Intra-day order flow** tracks queue depth and completion pace in real time against the projected EOD target. It shows whether the agent is staying ahead of demand, falling behind, or recovering after disruption — and at what point in the day that happens.
 
+![Order Flow](docs/screenshots/06_order_flow.png)
 
 ---
 
 ## Worker Utilization
+
+**Worker utilization** shows how each person's productive hours were distributed across tasks for the day. Idle time, task concentration, and role balance are all visible here — useful for validating that the agent is deploying the team efficiently rather than over-relying on a subset of workers.
 
 ![Worker Utilization](docs/screenshots/07_worker_utilization.png)
 
