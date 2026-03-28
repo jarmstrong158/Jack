@@ -8,11 +8,11 @@ Built on top of [Dolly](https://github.com/jarmstrong158/Dolly). Dolly handles s
 
 ## Simulation
 
-7 workers. 6 tasks. Every 15 minutes, Jack assigns each worker a task and decides whether to push them into hustle mode.
+7 workers. 6 tasks. Every 15 minutes, Jack assigns each worker a task and decides whether to push them into hustle.
 
-**Tasks:** pick, pack, restock, side project, management, idle
+Demand is seasonal — order volume ranges from ~60/day in January to ~500/day at peak. Each worker arrives with a probabilistic debuff profile: sleep quality, health status, injury risk, no-call probability. On top of that, the simulation enforces per-worker physical constraints, role requirements, and scheduling rules that further restrict what each person can do on any given day.
 
-Order volume swings from ~60/day in January to ~500/day at the May/June peak. Workers come in with varying debuffs — bad sleep, illness, injuries, call-offs. Some have hard constraints: Marcus carries management duty every day, Blake is pack-only during EOE flares, pickers rotate daily.
+Jack learns to optimize across all of it simultaneously — not just routing the day, but managing the week.
 
 ---
 
