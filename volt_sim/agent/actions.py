@@ -2,11 +2,11 @@
 Action space encoding/decoding for the warehouse environment.
 
 Each step the agent assigns a task to EVERY worker, plus a hustle flag.
-7 workers × 12 actions per head = 7 independent heads, each outputting 0-11.
+7 workers × 14 actions per head = 7 independent heads, each outputting 0-13.
 
 Encoding:
-  0-5  → task without hustle  (pick, pack, restock, side_project, management, idle)
-  6-11 → task with hustle     (same order, hustle blocked for management/idle)
+  0-6  → task without hustle  (pick, pack, restock, side_project, management, idle, cycle_count)
+  7-13 → task with hustle     (same order, hustle blocked for management/idle/cycle_count)
 """
 from volt_sim.config import (
     NUM_WORKERS, NUM_TASKS, TASKS, TASK_TO_IDX,

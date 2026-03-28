@@ -2,7 +2,7 @@
 PPO implementation with LSTM trunk for Dolly warehouse RL.
 
 Architecture:
-  state(155) → Linear → ReLU → LSTM(256) → 7 policy heads + 1 value head
+  state(162) → Linear → ReLU → LSTM(256) → 7 policy heads + 1 value head
 
 The LSTM maintains a hidden state across every 15-minute step of the simulation,
 giving Dolly temporal memory across the full work day and work week. This lets it
