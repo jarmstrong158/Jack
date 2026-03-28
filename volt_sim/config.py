@@ -202,6 +202,10 @@ MARCUS_MANAGEMENT_HOURS_REQUIRED = 4.0
 MARCUS_PRE_SIM_MANAGEMENT = 1.25         # 7:45 to 9:00 = management before sim starts
 MANAGEMENT_FALLBACK_WORKER_ID = 2          # Felix steps in when Marcus + Nolan are both absent
 
+# Peak season early start — Marcus arrives 30 min earlier in spring/summer for cycle counts
+MARCUS_PEAK_SEASONS = {"spring", "summer"}
+MARCUS_PEAK_EARLY_CYCLE_COUNT = 0.5     # 0.5h pre-sim cycle count credit
+
 # ─── Debuff: Sleep Category ─────────────────────────────────────────────────
 SLEEP_DEBUFFS = [
     {"name": "well_rested", "multiplier": 1.05, "probability": 0.10},

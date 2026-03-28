@@ -23,6 +23,7 @@ from volt_sim.config import (
     RESTOCK_STARTING_LEVEL, RESTOCK_DRAIN_FACTOR,
     RESTOCK_PICK_PENALTY_THRESHOLD, RESTOCK_PICK_PENALTY_MULTIPLIER,
     CYCLE_COUNT_ELIGIBLE_WORKERS,
+    MARCUS_PEAK_SEASONS, MARCUS_PEAK_EARLY_CYCLE_COUNT,
 )
 from volt_sim.env.episode_generator import generate_episode, EpisodeConfig
 from volt_sim.env.workers import WorkerState
@@ -110,6 +111,10 @@ class WarehouseEnv:
 
         # Marcus's pre-sim management (7:45-9:00)
         self.episode.workers[0].management_hours = MARCUS_PRE_SIM_MANAGEMENT
+
+        # Peak season early start — Marcus arrives 30 min earlier in spring/summer for cycle counts
+        if self.episode.season in MARCUS_PEAK_SEASONS:
+            self.episode.workers[0].cycle_count_hours_today = MARCUS_PEAK_EARLY_CYCLE_COUNT
 
         # Morning pick round: everyone grabs 1-2 carts before assignments
         self._morning_pick_round()
