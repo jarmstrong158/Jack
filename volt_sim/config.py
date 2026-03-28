@@ -6,12 +6,12 @@ All tunable parameters live here. Nothing hardcoded elsewhere.
 # ─── Worker Roster ───────────────────────────────────────────────────────────
 WORKERS = [
     {"id": 0, "name": "Marcus", "oph": 17.0,  "shift_hours": 9.75, "role": "manager"},
-    {"id": 1, "name": "Nolan",     "oph": 15.35, "shift_hours": 8.0,  "role": "assistant_manager"},
-    {"id": 2, "name": "Felix",    "oph": 16.23, "shift_hours": 8.0,  "role": "warehouse"},
-    {"id": 3, "name": "Blake",   "oph": 18.30, "shift_hours": 8.0,  "role": "warehouse"},
-    {"id": 4, "name": "Reid",      "oph": 18.94, "shift_hours": 8.0,  "role": "warehouse"},
-    {"id": 5, "name": "Trent",      "oph": 15.28, "shift_hours": 8.0,  "role": "warehouse"},
-    {"id": 6, "name": "Omar",    "oph": 14.88, "shift_hours": 8.0,  "role": "warehouse"},
+    {"id": 1, "name": "Nolan",     "oph": 15.35, "shift_hours": 8.5,  "role": "assistant_manager"},
+    {"id": 2, "name": "Felix",    "oph": 16.23, "shift_hours": 8.5,  "role": "warehouse"},
+    {"id": 3, "name": "Blake",   "oph": 18.30, "shift_hours": 8.5,  "role": "warehouse"},
+    {"id": 4, "name": "Reid",      "oph": 18.94, "shift_hours": 8.5,  "role": "warehouse"},
+    {"id": 5, "name": "Trent",      "oph": 15.28, "shift_hours": 8.5,  "role": "warehouse"},
+    {"id": 6, "name": "Omar",    "oph": 14.88, "shift_hours": 8.5,  "role": "warehouse"},
 ]
 
 NUM_WORKERS = len(WORKERS)
@@ -320,7 +320,7 @@ REWARDS = {
     "per_management_hour":            0.5,    # per-step signal so bot sees value in management
     "per_idle_hour":                 -0.5,
     "packers_starved":               -1.0,   # per packer with nothing to pack while queue has orders
-    "picked_backlog":                -0.5,   # per 10 orders sitting picked but not packed
+    "picked_backlog":                -2.0,   # per 10 orders sitting picked but not packed
     "management_duty_met":           30.0,
     "management_duty_missed":       -50.0,
     "blake_prohibited_task":        -5.0,
@@ -351,7 +351,7 @@ TRAINING = {
     "total_episodes": 1000,      # each episode = 1 full year (~260 days, ~13000 steps at 10min intervals)
     "log_interval": 1,           # log every year (they're long)
     "save_interval": 10,         # checkpoint every 10 years
-    "rolling_window": 100,       # rolling window for daily stats
+    "rolling_window": 522,       # 2 full years of daily logs (~261 work days/year)
 }
 
 # ─── State Vector Dimensions ────────────────────────────────────────────────

@@ -12,7 +12,7 @@ from volt_sim.config import (
     NUM_WORKERS, NUM_TASKS, TASKS, TASK_TO_IDX,
     MARCUS_MANAGEMENT_HOURS_REQUIRED as MGMT_REQUIRED,
     MANAGEMENT_MIN_DAILY_HOURS, MANAGEMENT_FALLBACK_WORKER_ID,
-    HUSTLE_BLOCKED_TASKS,
+    HUSTLE_BLOCKED_TASKS, EOD_HOUR,
 )
 
 # Each head outputs 0-11: first 6 = no hustle, next 6 = hustle
@@ -54,12 +54,28 @@ def get_valid_action_mask(env) -> list[list[bool]]:
     for w_id in range(NUM_WORKERS):
         worker = day_env.episode.workers[w_id]
 
+        orders_remaining = (day_env.orders_in_queue + day_env.orders_picked_not_audited) > 0
+
         if worker.is_absent:
             # Absent: only idle (no hustle)
             worker_mask = [False] * ACTION_HEAD_SIZE
             worker_mask[IDLE_IDX] = True
-        elif worker.hours_remaining <= 0 and not day_env.is_ot:
-            # Shift over, no OT: only idle
+        elif day_env.is_ot and orders_remaining:
+            # OT with orders still open — pick and pack only, no exceptions.
+            # Every available minute goes toward throughput.
+            worker_mask = [False] * ACTION_HEAD_SIZE
+            if worker.is_pack_only:
+                worker_mask[TASK_TO_IDX["pack"]] = True
+                if worker.can_hustle:
+                    worker_mask[TASK_TO_IDX["pack"] + NUM_TASKS] = True
+            else:
+                worker_mask[TASK_TO_IDX["pick"]] = True
+                worker_mask[TASK_TO_IDX["pack"]] = True
+                if worker.can_hustle:
+                    worker_mask[TASK_TO_IDX["pick"] + NUM_TASKS] = True
+                    worker_mask[TASK_TO_IDX["pack"] + NUM_TASKS] = True
+        elif day_env.current_hour >= EOD_HOUR and worker.hours_remaining <= 0 and not day_env.is_ot:
+            # Shift exhausted at EOD: only idle
             worker_mask = [False] * ACTION_HEAD_SIZE
             worker_mask[IDLE_IDX] = True
         elif worker.is_picker:
