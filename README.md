@@ -184,15 +184,15 @@ volt_sim/
 
 ## Worker Roster
 
-| Name     | Base OPH | Shift | Role              | Notes |
-|----------|----------|-------|-------------------|-------|
-| Marcus | 17.00    | 9.75h | Manager           | Management duty 4h/day required |
-| Nolan     | 15.35    | 8.5h  | Assistant Manager | Flex picker/packer |
-| Felix    | 16.23    | 8.5h  | Warehouse         | Picker Wednesdays |
-| Blake   | 18.30    | 8.5h  | Warehouse         | EOE flare → pack-only (5–25% by season) |
-| Reid      | 18.94    | 8.5h  | Warehouse         | Picker Mondays; 2.5% NCNS risk |
-| Trent      | 15.28    | 8.5h  | Warehouse         | Soreness mechanic after heavy pick days |
-| Omar    | 14.88    | 8.5h  | Warehouse         | Picker Thursdays |
+| Name     | Base OPH | Shift | Role              |
+|----------|----------|-------|-------------------|
+| Marcus | 17.00    | 9.75h | Manager           |
+| Nolan     | 15.35    | 8.5h  | Assistant Manager |
+| Felix    | 16.23    | 8.5h  | Warehouse         |
+| Blake   | 18.30    | 8.5h  | Warehouse         |
+| Reid      | 18.94    | 8.5h  | Warehouse         |
+| Trent      | 15.28    | 8.5h  | Warehouse         |
+| Omar    | 14.88    | 8.5h  | Warehouse         |
 
 **Picker rotation:** Mon=Reid, Tue=Blake, Wed=Felix, Thu=Omar, Fri=Trent
 
