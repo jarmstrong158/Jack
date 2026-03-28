@@ -217,7 +217,7 @@ def train():
 
         # Flush log at year end — write full rolling log and year snapshot
         logger._write_log()
-        logger.write_year_snapshot(ep_day_count)
+        logger.write_year_snapshot(ep_day_count, year_summary=year_summary)
 
         # Save checkpoint
         if episode_num % save_interval == 0:

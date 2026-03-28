@@ -229,8 +229,9 @@ const TASK_COLORS = {
   side_project: '#9c27b0',
   management: '#00bcd4',
   idle: '#f44336',
+  cycle_count: '#f06292',
 };
-const TASK_ORDER = ['pick', 'pack', 'restock', 'side_project', 'management', 'idle'];
+const TASK_ORDER = ['pick', 'pack', 'restock', 'side_project', 'management', 'idle', 'cycle_count'];
 const WORKER_NAMES = ['Marcus','Nolan','Felix','Blake','Reid','Trent','Omar'];
 
 let logData = null;
@@ -567,6 +568,33 @@ function renderYearOverview() {
   const gradeF = eps.filter(e => e.footer.grade === 'F').length;
   const otDays = eps.filter(e => e.footer.ot_hours > 0).length;
 
+  // Cycle count compliance from year_summary (written at year-end)
+  const ys = (logData && logData.year_summary) || {};
+  const ccOverdue = ys.cycle_counts_overdue_final ?? null;
+  const ccBreakdown = ys.year_reward_breakdown || {};
+  const ccWeeksComplete = ccBreakdown.cycle_count_week_complete != null
+    ? Math.round(ccBreakdown.cycle_count_week_complete / 20)   // 20 pts per week
+    : null;
+  const ccWeeksMissed = ccBreakdown.cycle_count_week_missed != null
+    ? Math.round(Math.abs(ccBreakdown.cycle_count_week_missed) / 15)  // 15 pts per miss
+    : null;
+  const ccCritical = (ccBreakdown.cycle_count_critical_overdue || 0) < 0;
+
+  const ccOverdueColor = ccOverdue === null ? '#888'
+    : ccOverdue === 0 ? '#4caf50'
+    : ccOverdue <= 4  ? '#ffc107'
+    : '#f44336';
+
+  const ccCompleteHtml = ccWeeksComplete !== null
+    ? `<div class="stat-card"><div class="label">CC Weeks Done</div><div class="value" style="color:#4caf50">${ccWeeksComplete}</div></div>`
+    : '';
+  const ccMissedHtml = ccWeeksMissed !== null
+    ? `<div class="stat-card"><div class="label">CC Weeks Missed</div><div class="value" style="color:${ccWeeksMissed > 4 ? '#f44336' : ccWeeksMissed > 0 ? '#ffc107' : '#4caf50'}">${ccWeeksMissed}</div></div>`
+    : '';
+  const ccOverdueHtml = ccOverdue !== null
+    ? `<div class="stat-card"><div class="label">CC Overdue (EOY)</div><div class="value" style="color:${ccOverdueColor}">${ccOverdue}wk${ccCritical ? ' ⚠' : ''}</div></div>`
+    : '';
+
   document.getElementById('yearOverview').innerHTML = `
     <div class="summary-grid">
       <div class="stat-card"><div class="label">Days Logged</div><div class="value">${totalDays}</div></div>
@@ -575,6 +603,7 @@ function renderYearOverview() {
       <div class="stat-card"><div class="label">A-Grade Days</div><div class="value grade-A">${gradeA} (${(gradeA/totalDays*100).toFixed(0)}%)</div></div>
       <div class="stat-card"><div class="label">F-Grade Days</div><div class="value grade-F">${gradeF}</div></div>
       <div class="stat-card"><div class="label">OT Days</div><div class="value">${otDays} (${(otDays/totalDays*100).toFixed(0)}%)</div></div>
+      ${ccCompleteHtml}${ccMissedHtml}${ccOverdueHtml}
     </div>
   `;
 

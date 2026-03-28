@@ -132,16 +132,19 @@ class EpisodeLogger:
         with open(self.log_path, "w") as f:
             f.write(data)
 
-    def write_year_snapshot(self, n_days: int):
+    def write_year_snapshot(self, n_days: int, year_summary: dict = None):
         """Write the last n_days episodes (exactly one year) to year_snapshot.json.
 
         The dashboard reads this file. It is only written at year-end so the
         dashboard always sees a complete year — never a partial season view.
+        year_summary (from YearEnv._get_year_summary) is included for the
+        cycle count compliance panel.
         """
         year_episodes = self.episodes[-n_days:] if n_days <= len(self.episodes) else self.episodes
         output = {
             "episodes": year_episodes,
             "training_stats": self.get_training_stats(),
+            "year_summary": year_summary or {},
         }
         snapshot_path = self.log_dir / "year_snapshot.json"
         data = json.dumps(output, indent=2)
