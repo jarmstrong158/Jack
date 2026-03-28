@@ -17,7 +17,7 @@ WORKERS = [
 NUM_WORKERS = len(WORKERS)
 
 # ─── Tasks ───────────────────────────────────────────────────────────────────
-TASKS = ["pick", "pack", "restock", "side_project", "management", "idle"]
+TASKS = ["pick", "pack", "restock", "side_project", "management", "idle", "cycle_count"]
 TASK_TO_IDX = {t: i for i, t in enumerate(TASKS)}
 NUM_TASKS = len(TASKS)
 
@@ -52,7 +52,7 @@ HUSTLE_DAILY_CAPS = {
 HUSTLE_WEEKLY_THRESHOLDS = {w_id: cap * 2 for w_id, cap in HUSTLE_DAILY_CAPS.items()}
 
 # Tasks that cannot be hustled (hustle implies physical output — not admin or standing still)
-HUSTLE_BLOCKED_TASKS = {"management", "idle"}
+HUSTLE_BLOCKED_TASKS = {"management", "idle", "cycle_count"}
 
 # ─── Task OPH Multipliers ────────────────────────────────────────────────────
 # Base OPH represents packing speed. Picking is inherently faster.
@@ -65,6 +65,7 @@ TASK_OPH_MULTIPLIER = {
     "side_project": 1.0,  # side projects measured in hours
     "management": 0.0,    # management is time-based, not output-based
     "idle": 0.0,
+    "cycle_count": 0.0,   # audit work — time-based, not output-based
 }
 # Note: "pick" is NOT in TASK_OPH_MULTIPLIER — it's resolved dynamically
 # based on whether the worker is the designated picker or supplementing.
@@ -128,6 +129,8 @@ CYCLE_COUNT_HOURS = 1.5          # 1.5 hours each (split between Marcus + Nolan)
 CYCLE_COUNT_SLIP_PENALTY_1 = -30.0    # slipped 1 week
 CYCLE_COUNT_SLIP_PENALTY_2 = -75.0    # slipped 2+ weeks
 CYCLE_COUNT_MONTH_MISS_PENALTY = -200.0  # didn't complete all for the month
+CYCLE_COUNT_WEEKLY_HOURS_REQUIRED = 3.0  # 2 × 1.5h = full week complete
+CYCLE_COUNT_ELIGIBLE_WORKERS = {0, 1}    # Marcus and Nolan only
 
 SEASONS = ["winter", "spring", "summer", "fall"]
 
@@ -140,6 +143,15 @@ ORDER_ARRIVAL_BUCKETS = [
     ("late_surge",   0.15, 0.20),  # 4:15 PM - 5:00 PM (order cutoff)
 ]
 
+# High-volume days: heavier front-load, hard taper after 2 PM.
+# Orders still arrive all day but the bulk hits by noon — EOD is cleanup, not new work.
+ORDER_ARRIVAL_BUCKETS_HIGH_VOLUME = [
+    ("day_start",    0.45, 0.55),  # 9:00 AM instant burst
+    ("morning",      0.30, 0.38),  # 9:00 AM - 2:00 PM — heavy flow
+    ("afternoon",    0.08, 0.12),  # 2:00 PM - 4:15 PM — slowing
+    ("late_trickle", 0.03, 0.07),  # 4:15 PM - 5:00 PM — minimal, cleanup window
+]
+
 HIGH_VOLUME_PERCENTILE = 0.75  # top 25% of range = high volume day
 
 # ─── Shift Timing ───────────────────────────────────────────────────────────
@@ -148,6 +160,7 @@ LUNCH_HOUR = 13.0             # 1:00 PM
 LUNCH_DURATION = 0.5          # 30 minutes
 EOD_HOUR = 17.5               # 5:30 PM — everyone leaves, including Marcus
 ORDER_CUTOFF_HOUR = 17.0      # 5:00 PM — orders after this don't need completing today
+ORDER_ARRIVAL_END_HOUR = 16.83  # Last sim step before 5 PM — no orders scheduled after this
 STEP_DURATION = 1/6           # 10-minute intervals (0.1667 hours)
 
 # Morning arrival ends, afternoon starts, late surge starts
@@ -232,6 +245,8 @@ CALL_OFF_PROBABILITIES = {
     "Omar":    0.035,   # 3.5%
 }
 MAX_CALL_OFFS_PER_DAY = 2
+MAX_CALL_OFFS_HIGH_VOLUME = 1      # Only 1 call-off allowed on peak days
+CALL_OFF_PROBABILITY_HIGH_VOLUME = 0.02  # 2% across the board on high-volume days
 
 # ─── Individual Debuffs ─────────────────────────────────────────────────────
 INDIVIDUAL_DEBUFFS = {
@@ -324,6 +339,11 @@ REWARDS = {
     "management_duty_met":           30.0,
     "management_duty_missed":       -50.0,
     "blake_prohibited_task":        -5.0,
+
+    # Cycle counts
+    "per_cycle_count_hour":          1.0,    # per hour spent on cycle count
+    "cycle_count_week_complete":    40.0,    # bonus when weekly threshold met
+    "cycle_count_week_missed":     -75.0,    # penalty if not completed by week end
 }
 
 # ─── Grading ───────────────────────────────────────────────────────────────
@@ -355,17 +375,17 @@ TRAINING = {
 }
 
 # ─── State Vector Dimensions ────────────────────────────────────────────────
-# Per worker: 6 one-hot task + 13 scalars = 19
+# Per worker: 7 one-hot task + 13 scalars = 20
 # Scalars: oph, hours_worked, hours_remaining, generic_debuff, individual_debuff,
 #          fatigue, is_picker, is_pack_only, soreness_progress, management_hours,
 #          hustle_today_ratio, hustle_weekly_ratio, is_hustle_exhausted
-WORKER_STATE_SIZE = NUM_TASKS + 13  # 19
+WORKER_STATE_SIZE = NUM_TASKS + 13  # 20
 ENV_STATE_SIZE = 15     # 1 hour + 1 orders_remaining + 1 orders_completed +
                         # 1 picked_not_audited + 1 restock_remaining +
                         # 1 side_project_progress + 4 season_onehot +
                         # 1 is_high_volume + 1 total_mgmt_hours + 1 picker_needs_replacement +
                         # 1 restock_level
-TOTAL_STATE_SIZE = NUM_WORKERS * WORKER_STATE_SIZE + ENV_STATE_SIZE  # 7*19+15 = 148
+TOTAL_STATE_SIZE = NUM_WORKERS * WORKER_STATE_SIZE + ENV_STATE_SIZE  # 7*20+15 = 155
 
 # ─── OT ─────────────────────────────────────────────────────────────────────
 # Everyone can stay until 6:30 PM (1 hour past 5:30 EOD).

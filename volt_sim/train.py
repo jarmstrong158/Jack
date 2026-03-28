@@ -122,7 +122,9 @@ def train():
     print()
 
     start_time = time.time()
-    day_count = 0
+    # Initialize day_count from start_episode so resume preserves true cumulative day numbers.
+    # 261 work days/year — this keeps episode numbers in the log consistent across restarts.
+    day_count = (start_episode - 1) * 261
 
     for episode_num in range(start_episode, total_episodes + 1):
         state = env.reset()
@@ -195,10 +197,6 @@ def train():
                             f"WinR: {stats['win_rate_last_100']:.0%}"
                         )
 
-                # Write log to disk every 50 days
-                if day_count % 50 == 0:
-                    logger._write_log()
-
         # Year complete — log it
         year_summary = info.get("year_summary", {})
         grade_dist = year_summary.get("grade_distribution", {})
@@ -217,8 +215,9 @@ def train():
             f"{elapsed:.0f}s\n"
         )
 
-        # Flush log at year end
+        # Flush log at year end — write full rolling log and year snapshot
         logger._write_log()
+        logger.write_year_snapshot(ep_day_count)
 
         # Save checkpoint
         if episode_num % save_interval == 0:

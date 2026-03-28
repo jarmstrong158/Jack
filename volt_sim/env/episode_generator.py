@@ -94,8 +94,8 @@ def generate_episode(cooldown_tracker: dict = None,
     if has_deliberate:
         deliberate_size = random.uniform(*DELIBERATE_PROJECT_SIZE_RANGE)
 
-    # Roll debuffs
-    workers = roll_debuffs(season, cooldown_tracker)
+    # Roll debuffs — pass high_vol so call-off logic applies peak-day caps
+    workers = roll_debuffs(season, cooldown_tracker, is_high_volume=high_vol)
 
     # Hustle is now agent-controlled per step — not auto-applied at episode start.
     # Workers start each day with hustle off; the agent decides when to call it.

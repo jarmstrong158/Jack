@@ -379,7 +379,7 @@ class PPOAgent:
 
     # Bumped whenever the architecture changes in a backward-incompatible way.
     # load() rejects files with a different version instead of attempting a broken load.
-    ARCH_VERSION = "lstm-v1"
+    ARCH_VERSION = "lstm-v2"
 
     def save(self, path: str, state_stats=None):
         data = {

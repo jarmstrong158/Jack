@@ -128,10 +128,24 @@ class EpisodeLogger:
             "episodes": self.episodes,
             "training_stats": self.get_training_stats(),
         }
-        # Serialize once, then write the complete string in one shot.
-        # This minimizes the window where the file is incomplete.
         data = json.dumps(output, indent=2)
         with open(self.log_path, "w") as f:
+            f.write(data)
+
+    def write_year_snapshot(self, n_days: int):
+        """Write the last n_days episodes (exactly one year) to year_snapshot.json.
+
+        The dashboard reads this file. It is only written at year-end so the
+        dashboard always sees a complete year — never a partial season view.
+        """
+        year_episodes = self.episodes[-n_days:] if n_days <= len(self.episodes) else self.episodes
+        output = {
+            "episodes": year_episodes,
+            "training_stats": self.get_training_stats(),
+        }
+        snapshot_path = self.log_dir / "year_snapshot.json"
+        data = json.dumps(output, indent=2)
+        with open(snapshot_path, "w") as f:
             f.write(data)
 
     def get_training_stats(self) -> dict:

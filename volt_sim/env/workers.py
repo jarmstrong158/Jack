@@ -14,6 +14,7 @@ from volt_sim.config import (
     HUSTLE_MODE_BONUS, HUSTLE_EXHAUSTION_MULTIPLIER,
     HUSTLE_DAILY_CAPS, HUSTLE_WEEKLY_THRESHOLDS,
     CALL_OFF_PROBABILITIES, MAX_CALL_OFFS_PER_DAY,
+    MAX_CALL_OFFS_HIGH_VOLUME, CALL_OFF_PROBABILITY_HIGH_VOLUME,
 )
 
 
@@ -60,6 +61,9 @@ class WorkerState:
 
     # Marcus management
     management_hours: float = 0.0
+
+    # Cycle count tracking (Marcus and Nolan only)
+    cycle_count_hours_today: float = 0.0
 
     # Hustle mode — agent-controlled per-step toggle
     hustle_mode: bool = False
@@ -138,10 +142,8 @@ class WorkerState:
     def can_do_task(self, task: str) -> bool:
         if self.is_absent:
             return False
-        if self.is_pack_only and task not in ("pack", "idle"):
+        if self.is_pack_only and task != "pack":
             return False
-        if self.hours_remaining <= 0:
-            return task == "idle"
         return True
 
 
@@ -155,7 +157,7 @@ def _roll_category(debuff_list: list[dict]) -> dict:
     return debuff_list[-1]
 
 
-def roll_debuffs(season: str, cooldown_tracker: dict) -> list[WorkerState]:
+def roll_debuffs(season: str, cooldown_tracker: dict, is_high_volume: bool = False) -> list[WorkerState]:
     workers = []
 
     for cfg in WORKERS:
@@ -190,15 +192,21 @@ def roll_debuffs(season: str, cooldown_tracker: dict) -> list[WorkerState]:
 
         workers.append(w)
 
-    # Roll daily call-offs (max 2 per day)
-    _roll_call_offs(workers)
+    # Roll daily call-offs (max 1 on high-volume days, max 2 otherwise)
+    _roll_call_offs(workers, is_high_volume)
 
     return workers
 
 
-def _roll_call_offs(workers: list[WorkerState]):
-    """Roll call-offs for each worker. Max MAX_CALL_OFFS_PER_DAY can call off."""
+def _roll_call_offs(workers: list[WorkerState], is_high_volume: bool = False):
+    """Roll call-offs for each worker.
+
+    High-volume days: max 1 call-off, 2% chance per worker.
+    Normal days: max 2 call-offs, per-worker probabilities from config.
+    """
+    max_call_offs = MAX_CALL_OFFS_HIGH_VOLUME if is_high_volume else MAX_CALL_OFFS_PER_DAY
     call_offs = 0
+
     # Shuffle order so it's not biased toward early workers
     indices = list(range(len(workers)))
     random.shuffle(indices)
@@ -206,19 +214,22 @@ def _roll_call_offs(workers: list[WorkerState]):
     for i in indices:
         w = workers[i]
         if w.is_absent:
-            # Already absent from individual debuff (shouldn't happen now but safety)
             call_offs += 1
             continue
 
-        prob = CALL_OFF_PROBABILITIES.get(w.name, 0.0)
+        if is_high_volume:
+            prob = CALL_OFF_PROBABILITY_HIGH_VOLUME
+        else:
+            prob = CALL_OFF_PROBABILITIES.get(w.name, 0.0)
+
         if prob > 0 and random.random() < prob:
-            if call_offs < MAX_CALL_OFFS_PER_DAY:
+            if call_offs < max_call_offs:
                 w.is_absent = True
                 w.individual_debuff = "call_off"
                 w.individual_multiplier = 0.0
                 w.individual_effect = "absent"
                 call_offs += 1
-            # else: denied — tough cookies, we need you today
+            # else: denied — at capacity, we need you today
 
 
 def _roll_individual_debuff(w: WorkerState, cfg: dict, season: str,

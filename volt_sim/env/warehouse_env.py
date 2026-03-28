@@ -8,7 +8,7 @@ from typing import Optional
 
 from volt_sim.config import (
     NUM_WORKERS, NUM_TASKS, TASKS, TASK_TO_IDX,
-    DAY_START_HOUR, LUNCH_HOUR, LUNCH_DURATION, EOD_HOUR,
+    DAY_START_HOUR, LUNCH_HOUR, LUNCH_DURATION, EOD_HOUR, ORDER_CUTOFF_HOUR,
     STEP_DURATION, TOTAL_STATE_SIZE,
     WORKER_STATE_SIZE, ENV_STATE_SIZE, SEASONS,
     MARCUS_MANAGEMENT_HOURS_REQUIRED, MANAGEMENT_MIN_DAILY_HOURS,
@@ -22,6 +22,7 @@ from volt_sim.config import (
     MARCUS_PRE_SIM_MANAGEMENT,
     RESTOCK_STARTING_LEVEL, RESTOCK_DRAIN_FACTOR,
     RESTOCK_PICK_PENALTY_THRESHOLD, RESTOCK_PICK_PENALTY_MULTIPLIER,
+    CYCLE_COUNT_ELIGIBLE_WORKERS,
 )
 from volt_sim.env.episode_generator import generate_episode, EpisodeConfig
 from volt_sim.env.workers import WorkerState
@@ -156,14 +157,11 @@ class WarehouseEnv:
                 worker = self.episode.workers[worker_id]
                 new_task = TASKS[task_idx]
 
-                # Enforce Blake pack-only constraint
-                if worker.is_pack_only and new_task not in ("pack", "idle"):
-                    step_reward += self._add_reward("blake_prohibited_task")
-                    continue
+                # Enforce Blake pack-only constraint — always redirect to pack, never idle
+                if worker.is_pack_only and new_task != "pack":
+                    new_task = "pack"
 
                 if worker.can_do_task(new_task):
-                    if worker.current_task != new_task:
-                        worker.work_carry = 0.0  # reset carry on task switch
                     worker.current_task = new_task
 
                     # Apply hustle flag — blocked if exhausted, task ineligible, or daily cap hit
@@ -186,19 +184,15 @@ class WarehouseEnv:
             # All workers stop for lunch
             for w in self.episode.workers:
                 w.current_task = "idle"
-            self._log_step(step_reward)
-            self.total_reward += step_reward
-            # After lunch, return state for reassignment
-            return self._get_state(), step_reward, False, self._get_info()
+        else:
+            # Process arrivals BEFORE work so orders available this step get worked
+            self._process_arrivals()
 
-        # Process arrivals BEFORE work so orders available this step get worked
-        self._process_arrivals()
+            # Simulate work for this 10-min step
+            step_reward += self._simulate_step()
 
-        # Simulate work for this 30-min step
-        step_reward += self._simulate_step()
-
-        # Advance time
-        self.current_hour += STEP_DURATION
+            # Advance time
+            self.current_hour += STEP_DURATION
 
         # Check if day is over — finalization rewards added to step_reward
         finalize_reward = self._check_eod()
@@ -224,11 +218,8 @@ class WarehouseEnv:
                 # During OT everyone stays to finish orders
                 active_workers.append(w)
                 continue
-            if w.hours_remaining <= 0:
-                w.current_task = "idle"
-                continue
-            worker_eod = w.shift_start + w.shift_hours - w.hours_lost
-            if self.current_hour >= worker_eod:
+            if self.current_hour >= EOD_HOUR and w.hours_remaining <= 0:
+                # Shift exhausted at EOD — done for the day
                 w.current_task = "idle"
                 continue
             active_workers.append(w)
@@ -419,6 +410,17 @@ class WarehouseEnv:
                     self.filler_progress += effective_duration
                     reward += self._add_reward("per_filler_unit", effective_duration)
 
+            elif task == "cycle_count":
+                if w.worker_id in CYCLE_COUNT_ELIGIBLE_WORKERS:
+                    w.cycle_count_hours_today += duration
+                    w.hours_worked += duration
+                    reward += self._add_reward("per_cycle_count_hour", duration)
+                else:
+                    # Non-eligible worker assigned cycle_count — treat as idle
+                    reward += self._add_reward("per_idle_hour", duration)
+                    w.hours_worked += duration
+                continue  # skip the generic hours_worked/productive_hour block below
+
             w.hours_worked += duration
             reward += self._add_reward("per_productive_hour", duration)
 
@@ -446,11 +448,16 @@ class WarehouseEnv:
     def _process_arrivals(self):
         if self.episode is None:
             return
-        # Process all arrivals up to current time (handles float rounding mismatches)
+        # Process arrivals up to current time, hard-capped at ORDER_CUTOFF_HOUR.
+        # Orders never arrive at or after 5 PM — any scheduled entries past that
+        # are dropped so they don't dump into the queue during OT.
         current = round(self.current_hour, 2)
         to_remove = []
         for key, count in self.episode.arrival_schedule.items():
-            if key <= current + 0.01:  # small epsilon for float comparison
+            if key >= ORDER_CUTOFF_HOUR:
+                # Drop — should never have been scheduled this late
+                to_remove.append(key)
+            elif key <= current + 0.01:
                 self.orders_in_queue += count
                 to_remove.append(key)
         for key in to_remove:
@@ -676,7 +683,7 @@ class WarehouseEnv:
         # A = all orders + restock + management duty + no OT
         # Each breach drops one letter grade.
         all_orders = (shipped >= total)
-        restock_pct_raw = 1.0 - (self.restock_remaining / max(0.01, ep.restock_hours))
+        restock_pct_raw = max(0.0, min(1.0, 1.0 - (self.restock_remaining / max(0.01, ep.restock_hours))))
         all_restock = (restock_pct_raw >= 0.95)
 
         total_mgmt_grade = self._get_effective_management_hours()
@@ -703,7 +710,7 @@ class WarehouseEnv:
             grades = ["A", "B", "C", "D", "F"]
             grade = grades[min(demerits, 4)]
 
-        restock_pct = 1.0 - (self.restock_remaining / max(0.01, ep.restock_hours))
+        restock_pct = max(0.0, min(1.0, 1.0 - (self.restock_remaining / max(0.01, ep.restock_hours))))
 
         return {
             "header": {

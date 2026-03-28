@@ -12,7 +12,7 @@ from volt_sim.config import (
     NUM_WORKERS, NUM_TASKS, TASKS, TASK_TO_IDX,
     MARCUS_MANAGEMENT_HOURS_REQUIRED as MGMT_REQUIRED,
     MANAGEMENT_MIN_DAILY_HOURS, MANAGEMENT_FALLBACK_WORKER_ID,
-    HUSTLE_BLOCKED_TASKS, EOD_HOUR,
+    HUSTLE_BLOCKED_TASKS, EOD_HOUR, CYCLE_COUNT_ELIGIBLE_WORKERS,
 )
 
 # Each head outputs 0-11: first 6 = no hustle, next 6 = hustle
@@ -90,6 +90,9 @@ def get_valid_action_mask(env) -> list[list[bool]]:
                 if day_env.restock_level < 1.0:
                     worker_mask[TASK_TO_IDX["restock"]] = True
                 worker_mask[TASK_TO_IDX["side_project"]] = True
+                # Cycle count: eligible workers only (no hustle variant)
+                if w_id in CYCLE_COUNT_ELIGIBLE_WORKERS:
+                    worker_mask[TASK_TO_IDX["cycle_count"]] = True
                 # Hustle variants for non-hustle-blocked tasks
                 if worker.can_hustle:
                     worker_mask[TASK_TO_IDX["pack"] + NUM_TASKS] = True
@@ -129,6 +132,8 @@ def get_valid_action_mask(env) -> list[list[bool]]:
                         daily_cap = MGMT_REQUIRED + backlog
                         no_hustle_ok = (w_id in MANAGEMENT_ELIGIBLE and
                                         total_mgmt < daily_cap)
+                elif task == "cycle_count":
+                    no_hustle_ok = (w_id in CYCLE_COUNT_ELIGIBLE_WORKERS)
                 elif worker.is_pack_only and task != "pack":
                     no_hustle_ok = False
                 elif task == "restock" and day_env.restock_level >= 1.0:

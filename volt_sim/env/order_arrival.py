@@ -6,8 +6,8 @@ import random
 import math
 
 from volt_sim.config import (
-    ORDER_ARRIVAL_BUCKETS, HIGH_VOLUME_PERCENTILE,
-    DAY_START_HOUR, MORNING_END_HOUR, AFTERNOON_END_HOUR,
+    ORDER_ARRIVAL_BUCKETS, ORDER_ARRIVAL_BUCKETS_HIGH_VOLUME, HIGH_VOLUME_PERCENTILE,
+    DAY_START_HOUR, MORNING_END_HOUR, AFTERNOON_END_HOUR, ORDER_ARRIVAL_END_HOUR,
     STEP_DURATION,
 )
 
@@ -15,31 +15,35 @@ from volt_sim.config import (
 def generate_arrival_schedule(total_orders: int, is_high_volume: bool,
                               eod_hour: float) -> dict[float, int]:
     """
-    Returns {simulated_hour: num_orders_arriving} for each 30-min step.
+    Returns {simulated_hour: num_orders_arriving} for each 10-min step.
 
-    High volume days flatten the curve for even distribution.
+    All orders are scheduled before ORDER_ARRIVAL_END_HOUR (4:50 PM sim-aligned step)
+    so nothing drops into the queue during OT. High-volume days front-load harder.
     """
+    arrival_end = ORDER_ARRIVAL_END_HOUR  # last sim step before 5 PM
     if is_high_volume:
-        return _flat_distribution(total_orders, eod_hour)
-    return _curved_distribution(total_orders, eod_hour)
+        return _curved_distribution(total_orders, arrival_end, ORDER_ARRIVAL_BUCKETS_HIGH_VOLUME)
+    return _curved_distribution(total_orders, arrival_end)
 
 
-def _curved_distribution(total_orders: int, eod_hour: float) -> dict[float, int]:
+def _curved_distribution(total_orders: int, eod_hour: float, buckets=None) -> dict[float, int]:
+    if buckets is None:
+        buckets = ORDER_ARRIVAL_BUCKETS
     # Draw fractions from the configured ranges
     fractions = []
-    for _, lo, hi in ORDER_ARRIVAL_BUCKETS:
+    for _, lo, hi in buckets:
         fractions.append(random.uniform(lo, hi))
 
     # Normalize to sum to 1.0
     total_frac = sum(fractions)
     fractions = [f / total_frac for f in fractions]
 
-    # Bucket boundaries in hours
+    # Bucket boundaries in hours — last bucket ends at eod_hour (arrival cutoff)
     bucket_boundaries = [
         (DAY_START_HOUR, DAY_START_HOUR),        # instant at day start
         (DAY_START_HOUR, MORNING_END_HOUR),       # morning flow
         (MORNING_END_HOUR, AFTERNOON_END_HOUR),   # afternoon slow
-        (AFTERNOON_END_HOUR, eod_hour),            # late surge
+        (AFTERNOON_END_HOUR, eod_hour),           # late trickle — ends at ORDER_ARRIVAL_END_HOUR
     ]
 
     schedule = {}

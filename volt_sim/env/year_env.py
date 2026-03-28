@@ -15,7 +15,8 @@ from volt_sim.config import (
     MANAGEMENT_BACKLOG_WEEK_THRESHOLD, MANAGEMENT_BACKLOG_WEEKLY_PENALTY,
     CYCLE_COUNTS_PER_WEEK, CYCLE_COUNT_HOURS,
     CYCLE_COUNT_SLIP_PENALTY_1, CYCLE_COUNT_SLIP_PENALTY_2,
-    CYCLE_COUNT_MONTH_MISS_PENALTY,
+    CYCLE_COUNT_MONTH_MISS_PENALTY, CYCLE_COUNT_WEEKLY_HOURS_REQUIRED,
+    CYCLE_COUNT_ELIGIBLE_WORKERS,
     RESTOCK_STARTING_LEVEL, NUM_WORKERS, NUM_TASKS,
     HUSTLE_WEEKLY_THRESHOLDS,
     REWARDS,
@@ -48,6 +49,7 @@ class YearEnv:
         self.management_backlog: float = 0.0  # accumulated missed mgmt hours
         self.cycle_counts_done_this_week: int = 0
         self.cycle_counts_overdue: int = 0  # from previous weeks
+        self.weekly_cycle_count_hours: float = 0.0  # hours spent on cycle count this week
 
         # Weekly hustle tracking — resets every Monday
         self.weekly_hustle_hours: dict[int, float] = {i: 0.0 for i in range(NUM_WORKERS)}
@@ -76,6 +78,7 @@ class YearEnv:
         self.mgmt_carryover_hours = 0.0
         self.cycle_counts_done_this_week = 0
         self.cycle_counts_overdue = 0
+        self.weekly_cycle_count_hours = 0.0
         self.current_week = 0
 
         # Reset weekly hustle tracking
@@ -189,7 +192,7 @@ class YearEnv:
         # This burns their available hours at day start.
         if self.mgmt_carryover_hours > 0:
             for w in self.day_env.episode.workers:
-                if w.worker_id in (0, 1):  # Marcus or Nolan
+                if w.worker_id in (0, 1) and not w.is_absent:  # Marcus or Nolan, present
                     catch_up = min(self.mgmt_carryover_hours, 1.0)  # split between them
                     w.management_hours += catch_up
                     w.hours_worked += catch_up
@@ -229,6 +232,11 @@ class YearEnv:
             reward += penalty
             self._add_year_reward("management_backlog_daily", penalty)
 
+        # Accumulate cycle count hours from eligible workers
+        for w in self.day_env.episode.workers:
+            if w.worker_id in CYCLE_COUNT_ELIGIBLE_WORKERS:
+                self.weekly_cycle_count_hours += w.cycle_count_hours_today
+
         # Accumulate weekly hustle hours and check for exhaustion
         for w in self.day_env.episode.workers:
             if w.hustle_hours_today > 0:
@@ -239,6 +247,12 @@ class YearEnv:
                 if (not self.hustle_exhausted.get(w.worker_id, False) and
                         self.weekly_hustle_hours[w.worker_id] >= threshold):
                     self.hustle_exhausted[w.worker_id] = True
+
+        # Friday EOD: clear hustle exhaustion so it doesn't bleed into next week
+        current_day_info = self.work_days[self.current_day_idx]
+        if current_day_info["day_of_week"] == 4:  # Friday
+            for w_id in self.hustle_exhausted:
+                self.hustle_exhausted[w_id] = False
 
         # Record daily summary
         summary = self.day_env.get_episode_summary(management_backlog=self.management_backlog)
@@ -252,19 +266,22 @@ class YearEnv:
         reward = 0.0
 
         if self.current_week > 0:
-            # Check cycle count compliance for previous week
-            missed = max(0, CYCLE_COUNTS_PER_WEEK - self.cycle_counts_done_this_week)
-            if missed > 0:
-                self.cycle_counts_overdue += missed
-
-                if self.cycle_counts_overdue <= CYCLE_COUNTS_PER_WEEK:
-                    # Slipped 1 week
-                    reward += CYCLE_COUNT_SLIP_PENALTY_1 * missed
+            # Check cycle count completion for previous week (hour-based)
+            if self.weekly_cycle_count_hours >= CYCLE_COUNT_WEEKLY_HOURS_REQUIRED:
+                bonus = REWARDS["cycle_count_week_complete"]
+                reward += bonus
+                self._add_year_reward("cycle_count_week_complete", bonus)
+                # Worked off an overdue week if any
+                if self.cycle_counts_overdue > 0:
+                    self.cycle_counts_overdue -= 1
+            else:
+                self.cycle_counts_overdue += 1
+                if self.cycle_counts_overdue <= 1:
+                    penalty = REWARDS["cycle_count_week_missed"]
                 else:
-                    # Slipped 2+ weeks
-                    reward += CYCLE_COUNT_SLIP_PENALTY_2 * missed
-
-                self._add_year_reward("cycle_count_slip", reward)
+                    penalty = CYCLE_COUNT_SLIP_PENALTY_2
+                reward += penalty
+                self._add_year_reward("cycle_count_week_missed", penalty)
 
             # Management backlog crossing week threshold
             if self.management_backlog > MANAGEMENT_BACKLOG_WEEK_THRESHOLD:
@@ -272,10 +289,11 @@ class YearEnv:
                 self._add_year_reward("management_backlog_weekly", penalty)
                 reward += penalty
 
-        # Reset weekly counters — new week, fresh hustle slate
+        # Reset weekly counters — new week
         self.cycle_counts_done_this_week = 0
+        self.weekly_cycle_count_hours = 0.0
         self.weekly_hustle_hours = {i: 0.0 for i in range(NUM_WORKERS)}
-        self.hustle_exhausted = {i: False for i in range(NUM_WORKERS)}
+        # Note: hustle_exhausted cleared at Friday EOD, not here
         self.current_week += 1
 
         self.year_reward += reward

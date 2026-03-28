@@ -3,11 +3,15 @@ State vector construction and normalization utilities.
 """
 import numpy as np
 from volt_sim.config import TOTAL_STATE_SIZE
+from volt_sim.env.year_env import YearEnv
+
+# Full state size including year-level features appended by YearEnv
+FULL_STATE_SIZE = TOTAL_STATE_SIZE + YearEnv.YEAR_STATE_SIZE  # 155 + 7 = 162
 
 
 def validate_state(state: np.ndarray) -> bool:
     """Check that the state vector has the expected shape and no NaN."""
-    if state.shape != (TOTAL_STATE_SIZE,):
+    if state.shape != (FULL_STATE_SIZE,):
         return False
     if np.any(np.isnan(state)):
         return False

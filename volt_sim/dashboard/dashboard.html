@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Volt Warehouse — Training Dashboard</title>
+<title>Jack — Training Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-annotation/3.0.1/chartjs-plugin-annotation.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
@@ -98,7 +98,7 @@
 <body>
 
 <div class="header">
-  <h1>DOLLY</h1>
+  <h1>JACK</h1>
   <span class="subtitle">Warehouse RL Training Dashboard</span>
 </div>
 
@@ -112,7 +112,7 @@
 <!-- Training Progress Panel -->
 <div class="grid">
   <div class="panel full">
-    <h2>Training Progress (Last 100 Episodes)</h2>
+    <h2>Training Progress (Last 100 Days)</h2>
     <div class="summary-grid" id="trainingStats">
       <div class="stat-card"><div class="label">Total Episodes</div><div class="value" id="statTotalEp">—</div></div>
       <div class="stat-card"><div class="label">Avg Reward</div><div class="value" id="statAvgReward">—</div></div>
@@ -132,6 +132,17 @@
   <div class="panel">
     <h2>Win Rate Trend</h2>
     <canvas id="winRateTrendChart" height="200"></canvas>
+  </div>
+</div>
+
+<!-- Year Overview Panel -->
+<div class="grid">
+  <div class="panel full">
+    <h2>Year Overview (Current Training Year)</h2>
+    <div id="yearOverview" class="no-data">Waiting for year data...</div>
+    <div style="margin-top:12px">
+      <canvas id="monthlyVolumeChart" height="120"></canvas>
+    </div>
   </div>
 </div>
 
@@ -239,9 +250,10 @@ document.getElementById('fileInput').addEventListener('change', e => {
   reader.readAsText(file);
 });
 
-// Try multiple paths to find episode_log.json
+// year_snapshot.json is written once per completed year — always a full year of data
 const paths = [
-  '/data/episode_log.json',
+  '/volt_sim/data/year_snapshot.json',
+  '/data/year_snapshot.json',
 ];
 
 let autoFollowLatest = true;
@@ -255,6 +267,7 @@ function loadDashboard() {
   populateEpisodeSelect();
   renderTrainingStats();
   renderTrainingCharts();
+  renderYearOverview();
   renderSeasonPerformance();
   renderDebuffImpact();
   renderDebuffCombos();
@@ -523,6 +536,79 @@ function renderDebuffCombos() {
   });
   html += '</tbody></table>';
   container.innerHTML = html;
+}
+
+// --- Year Overview ---
+function renderYearOverview() {
+  if (!logData || !logData.episodes || logData.episodes.length < 20) {
+    document.getElementById('yearOverview').innerHTML = '<div class="no-data">Need at least 20 days of data</div>';
+    return;
+  }
+
+  const eps = logData.episodes;
+
+  // Group by month
+  const months = {};
+  eps.forEach(ep => {
+    const m = ep.header.month;
+    if (!months[m]) months[m] = { orders: 0, shipped: 0, days: 0, grades: [], otDays: 0 };
+    months[m].orders += ep.footer.orders_total;
+    months[m].shipped += ep.footer.orders_shipped;
+    months[m].days++;
+    months[m].grades.push(ep.footer.grade);
+    if (ep.footer.ot_hours > 0) months[m].otDays++;
+  });
+
+  // Summary stats
+  const totalDays = eps.length;
+  const totalShipped = eps.reduce((s, e) => s + e.footer.orders_shipped, 0);
+  const totalOrders = eps.reduce((s, e) => s + e.footer.orders_total, 0);
+  const gradeA = eps.filter(e => e.footer.grade === 'A').length;
+  const gradeF = eps.filter(e => e.footer.grade === 'F').length;
+  const otDays = eps.filter(e => e.footer.ot_hours > 0).length;
+
+  document.getElementById('yearOverview').innerHTML = `
+    <div class="summary-grid">
+      <div class="stat-card"><div class="label">Days Logged</div><div class="value">${totalDays}</div></div>
+      <div class="stat-card"><div class="label">Orders Shipped</div><div class="value">${totalShipped.toLocaleString()}</div></div>
+      <div class="stat-card"><div class="label">Completion Rate</div><div class="value">${(totalShipped/Math.max(1,totalOrders)*100).toFixed(1)}%</div></div>
+      <div class="stat-card"><div class="label">A-Grade Days</div><div class="value grade-A">${gradeA} (${(gradeA/totalDays*100).toFixed(0)}%)</div></div>
+      <div class="stat-card"><div class="label">F-Grade Days</div><div class="value grade-F">${gradeF}</div></div>
+      <div class="stat-card"><div class="label">OT Days</div><div class="value">${otDays} (${(otDays/totalDays*100).toFixed(0)}%)</div></div>
+    </div>
+  `;
+
+  // Monthly volume bar chart
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const monthData = monthNames.map((m, i) => {
+    const key = monthNames[i];
+    const d = months[m] || months[key] || null;
+    // Find by matching month name in episode headers
+    const monthEps = eps.filter(e => e.header.month && e.header.month.startsWith(key));
+    const shipped = monthEps.reduce((s, e) => s + e.footer.orders_shipped, 0);
+    const total = monthEps.reduce((s, e) => s + e.footer.orders_total, 0);
+    return { shipped, total, days: monthEps.length };
+  });
+
+  if (charts.monthlyVolume) charts.monthlyVolume.destroy();
+  charts.monthlyVolume = new Chart(document.getElementById('monthlyVolumeChart'), {
+    type: 'bar',
+    data: {
+      labels: monthNames,
+      datasets: [
+        { label: 'Shipped', data: monthData.map(d => d.shipped), backgroundColor: '#4caf50', borderRadius: 3 },
+        { label: 'Total', data: monthData.map(d => d.total), backgroundColor: '#2a2d37', borderRadius: 3 },
+      ]
+    },
+    options: {
+      responsive: true,
+      scales: {
+        x: { ticks: { color: '#888' } },
+        y: { ticks: { color: '#666' }, beginAtZero: true }
+      },
+      plugins: { legend: { labels: { color: '#ccc' } } }
+    }
+  });
 }
 
 function renderEpisode(ep) {
