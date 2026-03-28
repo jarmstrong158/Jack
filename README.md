@@ -14,8 +14,6 @@ Built on top of [Dolly](https://github.com/jarmstrong158/Dolly). Dolly handles s
 
 Order volume swings from ~60/day in January to ~500/day at the May/June peak. Workers come in with varying debuffs — bad sleep, illness, injuries, call-offs. Some have hard constraints: Marcus carries management duty every day, Blake is pack-only during EOE flares, pickers rotate daily.
 
-Jack has to route around all of it without torching the week.
-
 ---
 
 ## Results
@@ -25,8 +23,6 @@ Jack has to route around all of it without torching the week.
 ![Training Header](docs/screenshots/01_training_header.png)
 
 ![Reward and Win Rate Trend](docs/screenshots/02_reward_trend.png)
-
-The summer dip is real. High volume, stacked debuffs, hustle budgets running thin. Win rate drops to ~62% at peak before recovering through fall and winter.
 
 ---
 
@@ -56,7 +52,7 @@ The summer dip is real. High volume, stacked debuffs, hustle budgets running thi
 | Summer | 69% |
 | Fall | 95% |
 
-Summer F-grades are driven primarily by bad sleep stacking with call-offs on high-volume days. Jack is still learning to absorb that combination without losing the day.
+Primary F-grade driver: bad sleep stacking with call-offs on peak-volume days.
 
 ---
 
@@ -64,7 +60,7 @@ Summer F-grades are driven primarily by bad sleep stacking with call-offs on hig
 
 ![Episode Detail](docs/screenshots/05_episode_detail.png)
 
-Blake called off. Reid slept well. Jack hit every order, filled every shelf, and clocked out on time — no OT, no scramble.
+Blake called off. 86/86 orders. 100% restock. No OT.
 
 ---
 
@@ -72,7 +68,6 @@ Blake called off. Reid slept well. Jack hit every order, filled every shelf, and
 
 ![Order Flow](docs/screenshots/06_order_flow.png)
 
-Queue depth stays near zero all day. Orders picked as fast as they arrive. Reward climbs clean and linear to ~97 with no stalls.
 
 ---
 
@@ -93,13 +88,13 @@ state (155-dim) → Linear → ReLU → LSTM(256) → 7 policy heads + 1 value h
 - **Training:** PPO with TBPTT, chunk size 16. Updates at end of each day.
 - **Hidden state:** persists across all ~13,000 steps in a year, reset at year start
 
-Action masking enforces hard constraints at every step — absent workers, shift end, hustle exhaustion, pack-only restrictions. The agent never sees invalid actions.
+Action masking enforces hard constraints at every step — absent workers, shift end, hustle exhaustion, pack-only restrictions.
 
 ---
 
 ## Hustle System
 
-Jack can push any worker into hustle on any task. Each worker has a daily cap. Hit twice that in a week and they're exhausted for the rest of the week: -15% OPH, hustle locked out.
+Per-worker daily hustle caps. Exceed 2× the cap in a week: -15% OPH, hustle locked for the remainder. Management and idle cannot be hustled.
 
 | Worker | Daily Cap | Exhaustion Threshold |
 |--------|-----------|----------------------|
@@ -110,8 +105,6 @@ Jack can push any worker into hustle on any task. Each worker has a daily cap. H
 | Reid | 8.0h | 16h |
 | Trent | 3.0h | 6h |
 | Omar | 7.0h | 14h |
-
-Management and idle cannot be hustled.
 
 ---
 
@@ -151,7 +144,7 @@ python -m http.server 8080
 
 `http://localhost:8080/volt_sim/dashboard/dashboard.html`
 
-Load `volt_sim/data/episode_log.json`. Updates once per completed training year.
+Load `volt_sim/data/episode_log.json`. Updates at year end.
 
 ---
 
