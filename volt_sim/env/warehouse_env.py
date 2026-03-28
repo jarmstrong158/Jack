@@ -477,8 +477,10 @@ class WarehouseEnv:
                 if not self.is_ot:
                     self.is_ot = True
                 self.ot_hours = self.current_hour - EOD_HOUR
-                # Hard stop at 6:30 PM — no one works past this
-                if self.current_hour >= OT_HARD_STOP:
+                # Hard stop at 6:30 PM — no one works past this.
+                # Use epsilon to guard against FP accumulation: 57 steps of 1/6
+                # from 9.0 lands at 18.4999...93 instead of exactly 18.5.
+                if self.current_hour >= OT_HARD_STOP - 1e-9:
                     return self._finalize_episode()
             else:
                 return self._finalize_episode()
