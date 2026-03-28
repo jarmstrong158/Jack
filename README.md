@@ -78,8 +78,6 @@ The debuff impact chart shows bad sleep as the leading F-grade contributor, foll
 
 ![Episode Detail](docs/screenshots/05_episode_detail.png)
 
-Grade A day with Blake called off (6-person crew):
-
 | Field | Value |
 |-------|-------|
 | Grade | **A** |
@@ -88,7 +86,7 @@ Grade A day with Blake called off (6-person crew):
 | Restock | 100% |
 | Reward | +202.7 |
 
-Debuffs fired: Blake call-off, Reid well-rested. Jack redistributed Blake's workload across the remaining 6 without touching OT — the LSTM recognized it was a manageable-volume day and didn't over-hustle.
+Blake called off. Reid slept well. Jack hit every order, filled every shelf, and clocked out on time — no OT, no scramble.
 
 ### Order Flow — Clean Execution
 
