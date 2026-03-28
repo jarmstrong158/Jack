@@ -141,11 +141,9 @@ Picker rotation: Mon=Reid, Tue=Blake, Wed=Felix, Thu=Omar, Fri=Trent
 
 | Grade | Criteria |
 |-------|----------|
-| A | All orders shipped, restock complete, management met, no OT |
-| B | All orders shipped with OT, or minor restock/management miss |
-| C | 95%+ completion |
-| D | 85–94% completion |
-| F | Under 85% or hard stop with open orders |
+| A | All orders shipped + restock ≥95% + management ≥4h + no OT + no backlog breach |
+| B/C/D | All orders shipped. One letter dropped per demerit: restock <95%, management 1.5–4h, OT used, excess mgmt backlog |
+| F | Any orders missed, or management under 1.5h |
 
 ---
 
