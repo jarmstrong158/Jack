@@ -16,7 +16,7 @@ from volt_sim.config import (
     CYCLE_COUNTS_PER_WEEK, CYCLE_COUNT_HOURS,
     CYCLE_COUNT_SLIP_PENALTY_1, CYCLE_COUNT_SLIP_PENALTY_2,
     CYCLE_COUNT_MONTH_MISS_PENALTY, CYCLE_COUNT_WEEKLY_HOURS_REQUIRED,
-    CYCLE_COUNT_ELIGIBLE_WORKERS,
+    CYCLE_COUNT_ELIGIBLE_WORKERS, CYCLE_COUNT_MAX_OVERDUE_WEEKS,
     RESTOCK_STARTING_LEVEL, NUM_WORKERS, NUM_TASKS,
     HUSTLE_WEEKLY_THRESHOLDS,
     REWARDS,
@@ -276,10 +276,12 @@ class YearEnv:
                     self.cycle_counts_overdue -= 1
             else:
                 self.cycle_counts_overdue += 1
-                if self.cycle_counts_overdue <= 1:
+                if self.cycle_counts_overdue <= CYCLE_COUNT_MAX_OVERDUE_WEEKS:
+                    # Weeks 1-4 overdue: mild nudge, orders still take priority
                     penalty = REWARDS["cycle_count_week_missed"]
                 else:
-                    penalty = CYCLE_COUNT_SLIP_PENALTY_2
+                    # Week 5+: serious repercussions — OSHA, management attention
+                    penalty = REWARDS["cycle_count_critical_overdue"]
                 reward += penalty
                 self._add_year_reward("cycle_count_week_missed", penalty)
 

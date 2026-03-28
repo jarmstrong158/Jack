@@ -131,6 +131,7 @@ CYCLE_COUNT_SLIP_PENALTY_2 = -75.0    # slipped 2+ weeks
 CYCLE_COUNT_MONTH_MISS_PENALTY = -200.0  # didn't complete all for the month
 CYCLE_COUNT_WEEKLY_HOURS_REQUIRED = 3.0  # 2 × 1.5h = full week complete
 CYCLE_COUNT_ELIGIBLE_WORKERS = {0, 1}    # Marcus and Nolan only
+CYCLE_COUNT_MAX_OVERDUE_WEEKS = 4        # grace window — serious penalty kicks in at week 5
 
 SEASONS = ["winter", "spring", "summer", "fall"]
 
@@ -344,10 +345,12 @@ REWARDS = {
     "management_duty_missed":       -50.0,
     "blake_prohibited_task":        -5.0,
 
-    # Cycle counts
-    "per_cycle_count_hour":          1.0,    # per hour spent on cycle count
-    "cycle_count_week_complete":    40.0,    # bonus when weekly threshold met
-    "cycle_count_week_missed":     -75.0,    # penalty if not completed by week end
+    # Cycle counts — intentionally lower weight than order completion.
+    # Missing orders is always worse than slipping a cycle count.
+    "per_cycle_count_hour":           0.5,    # step reward per hour (half of order work)
+    "cycle_count_week_complete":     20.0,    # weekly bonus (well below 50pt daily order bonus)
+    "cycle_count_week_missed":       -15.0,   # mild nudge — 1st through 4th week overdue
+    "cycle_count_critical_overdue": -150.0,   # serious repercussions — week 5+ overdue
 }
 
 # ─── Grading ───────────────────────────────────────────────────────────────
