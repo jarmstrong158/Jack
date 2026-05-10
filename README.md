@@ -4,6 +4,8 @@ PPO + LSTM agent for multi-week warehouse scheduling. Trained on a full simulate
 
 Built on top of [Dolly](https://github.com/jarmstrong158/Dolly). Dolly handles single-day optimization. Jack adds weekly scope: hustle pacing, worker exhaustion, seasonal demand, and consequence chains that carry across days.
 
+> **Successor:** [Clark](https://github.com/jarmstrong158/Clark) generalizes Jack's approach into a transformer + LSTM foundation model that fine-tunes per facility instead of training from scratch. Jack remains the single-facility reference implementation.
+
 ---
 
 ## Simulation
