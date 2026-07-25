@@ -15,8 +15,8 @@ from volt_sim.config import (
     HUSTLE_BLOCKED_TASKS, EOD_HOUR, CYCLE_COUNT_ELIGIBLE_WORKERS,
 )
 
-# Each head outputs 0-11: first 6 = no hustle, next 6 = hustle
-ACTION_HEAD_SIZE = NUM_TASKS * 2  # 12
+# Each head outputs 0..(NUM_TASKS*2 - 1): first NUM_TASKS = no hustle, rest = hustle
+ACTION_HEAD_SIZE = NUM_TASKS * 2  # 14 with the current 7 tasks
 NUM_ACTION_HEADS = NUM_WORKERS    # 7
 
 IDLE_IDX = TASK_TO_IDX["idle"]
@@ -30,8 +30,8 @@ def decode_actions(action_list: list[int]) -> list[tuple[int, int, bool]]:
     """
     Decode list of per-worker action indices into (worker_id, task_id, hustle) tuples.
     action_list: [action_for_worker_0, ..., action_for_worker_6]
-    action 0-5  → task without hustle
-    action 6-11 → task with hustle
+    action < NUM_TASKS  → that task without hustle
+    action >= NUM_TASKS → the same task with hustle
     """
     assignments = []
     for worker_id, action in enumerate(action_list):
@@ -99,7 +99,8 @@ def get_valid_action_mask(env) -> list[list[bool]]:
                     if day_env.restock_level < 1.0:
                         worker_mask[TASK_TO_IDX["restock"] + NUM_TASKS] = True
                     worker_mask[TASK_TO_IDX["side_project"] + NUM_TASKS] = True
-            # Felix fallback management (when both J+E absent, queue empty)
+            # Felix fallback management (when both Marcus and Nolan are absent
+            # and the queue is empty)
             both_primary_absent = all(
                 day_env.episode.workers[i].is_absent for i in MANAGEMENT_ELIGIBLE
             )

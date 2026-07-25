@@ -186,7 +186,7 @@ Debuffs are rolled in two independent categories at episode start. A worker rece
 | Trent | Soreness | 16.7% flat daily | -50% OPH after 4hrs non-side-project work |
 | Omar | Family needs | 15% daily after 7-day cooldown | Loses 1-2 hrs labor |
 
-### ANDREW SEASONAL FLARE PROBABILITIES
+### BLAKE SEASONAL FLARE PROBABILITIES
 
 - Winter: 5%
 - Spring: 20%
@@ -203,7 +203,7 @@ effective_oph = base_oph * sleep_modifier * health_modifier * individual_modifie
 
 After completing 110 pack orders OR 230 pick orders in a single day, OPH drops by 15% for the remainder of the shift. Trent's soreness mechanic is separate and stacks on top if active.
 
-## JONATHAN — MANAGER CONSTRAINTS
+## MARCUS — MANAGER CONSTRAINTS
 
 - 4 hours management duty required daily (fixed, non-negotiable)
 - Remaining hours flex to restock, side projects, or order support

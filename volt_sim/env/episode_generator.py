@@ -106,8 +106,8 @@ def generate_episode(cooldown_tracker: dict = None,
 
     # Check if Blake is picker (Tuesday) and has flare
     if picker_id == 3:  # Blake
-        andrew = workers[3]
-        if andrew.is_pack_only:
+        blake = workers[3]
+        if blake.is_pack_only:
             picker_needs_replacement = True
 
     # Mark picker
